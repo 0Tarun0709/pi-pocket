@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-21
+
+### Added
+
+- Switch between running Pi sessions and optionally show session tabs with live status.
+- Change the selected session's model from the browser while Pi is idle.
+- See elapsed time and thinking status alongside inline tool activity, without
+  exposing reasoning text. Fold activity or jump to the latest message.
+
+### Changed
+
+- **Breaking:** One `/remote` or `/remote pair` now covers all running sessions
+  with PockPi loaded under the same Pi profile. Paired browsers can access all
+  of those sessions; individual sessions no longer opt in. Reload already-open
+  Pi sessions once to pick up the change. Phone access still requires pairing.
+- Split the web UI into plain TypeScript and CSS and tighten the mobile layout.
+
 ## [0.1.5] - 2026-11-21
 
 ### Added
@@ -58,7 +75,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   emergency stop and disable remote access.
 - Installable Pi package, setup and security documentation, and MIT license.
 
-[Unreleased]: https://github.com/0Tarun0709/pockpi/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/0Tarun0709/pockpi/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/0Tarun0709/pockpi/compare/v0.1.5...v0.2.0
 [0.1.5]: https://github.com/0Tarun0709/pockpi/compare/480ff3f...v0.1.5
 [0.1.4]: https://github.com/0Tarun0709/pockpi/compare/6364ed9...480ff3f
 [0.1.3]: https://github.com/0Tarun0709/pockpi/compare/v0.1.2...6364ed9
