@@ -304,7 +304,8 @@
         updateSendButton();
         status.textContent = session.waiting ? 'Waiting for input' : session.busy ? 'Working' : 'Connected';
         status.dataset.working = String(session.busy && !session.waiting);
-        if (session.browser) document.querySelector('#browser-label').textContent = `This browser: ${session.browser.label} · ${session.browser.id}`;
+        if (session.local) document.querySelector('#browser-label').textContent = 'This browser: local access';
+        else if (session.browser) document.querySelector('#browser-label').textContent = `This browser: ${session.browser.label} · ${session.browser.id}`;
         document.querySelector('.footnote').textContent = session.queued ? `${session.queued} web prompt${session.queued === 1 ? '' : 's'} queued.` : 'Use the stop button to interrupt Pi while it is working.';
         notice.hidden = !session.waiting && !actionNotice;
         if (session.waiting) notice.textContent = `Pi is waiting for ${session.waiting.title || session.waiting.kind}. Answer it in the laptop terminal; remote answers are not supported yet.`;

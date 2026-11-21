@@ -32,11 +32,10 @@ else process.exit(2);
   extension({ on: (name, handler) => events[name] = handler, registerCommand: (name, command) => commands[name] = command, registerEntryRenderer() {}, appendEntry() {}, sendUserMessage() {} });
   const listen = Server.prototype.listen;
   Server.prototype.listen = function (_port, host, callback) { return listen.call(this, 0, host, callback); };
+  await events.session_start({}, ctx);
   try {
-    await events.session_start({}, ctx);
-  } finally { Server.prototype.listen = listen; }
-  try {
-    await commands.remote.handler('pair', ctx);
+    await commands.remote.handler('pair local', ctx);
+    Server.prototype.listen = listen;
     const paired = await fetch(url + '/api/pair', { method: 'POST', headers: { origin: url, 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
     const cookie = paired.headers.get('set-cookie').split(';')[0];
     await commands.remote.handler('share laptop.test.ts.net', ctx);
@@ -73,6 +72,7 @@ else process.exit(2);
     const calls = (await readFile(logFile, 'utf8')).trim().split('\n');
     assert.equal(calls.filter(line => line === 'serve --https=443 off').length, 2);
   } finally {
+    Server.prototype.listen = listen;
     await events.session_shutdown();
     await rm(dir, { recursive: true, force: true });
   }

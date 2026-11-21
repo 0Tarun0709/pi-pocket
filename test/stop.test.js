@@ -13,6 +13,7 @@ test('all-stop aborts, discards remote queue and stays disabled until enabled lo
   await mkdir(join(dir, 'web'));
   await copyFile('extensions/pocket/index.ts', join(dir, 'extensions/pocket/index.ts'));
   await copyFile('extensions/pocket/auth.ts', join(dir, 'extensions/pocket/auth.ts'));
+  await copyFile('extensions/pocket/tailscale.ts', join(dir, 'extensions/pocket/tailscale.ts'));
   await copyFile('web/index.html', join(dir, 'web/index.html'));
   await copyFile('web/pair.html', join(dir, 'web/pair.html'));
   await symlink(resolve('node_modules'), join(dir, 'node_modules'));
@@ -30,7 +31,7 @@ test('all-stop aborts, discards remote queue and stays disabled until enabled lo
     assert.equal(url, undefined);
     assert.match(await readFile(join(dir, 'state/pi-pocket/remote-disabled'), 'utf8'), /disabled/);
     await commands.remote.handler('enable', ctx);
-    await commands.remote.handler('pair', ctx);
+    await commands.remote.handler('pair local', ctx);
     const paired = await fetch(url + '/api/pair', { method: 'POST', headers: { origin: url, 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
     assert.equal(paired.status, 200);
     const cookie = paired.headers.get('set-cookie').split(';')[0];
@@ -77,6 +78,8 @@ test('all-stop aborts, discards remote queue and stays disabled until enabled lo
     await events.session_start({}, ctx);
     await assert.rejects(fetch(url));
     await commands.remote.handler('enable', ctx);
+    await assert.rejects(fetch(url));
+    await commands.remote.handler('pair local', ctx);
     assert.equal(await raw('/api/session', remoteHeaders), 200);
     assert.equal((await get('')).status, 200);
     assert.equal((await (await get('/api/session')).json()).queued, 0);

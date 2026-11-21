@@ -31,8 +31,8 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
       if (message.startsWith('Pi Remote: http')) url = message.replace('Pi Remote: ', '');
     }, custom: async factory => { const lines = factory({}, { fg: (_color, text) => text }, {}, () => {}).render(200); code = lines.find(line => line.startsWith('Code: ')).slice(6); qrLines = lines.filter(line => line.startsWith('\x1b[30;47m')).map(line => line.slice(8, -4)); } },
   };
-  try { await events.session_start({}, ctx); } finally { Server.prototype.listen = listen; }
-  await commands.remote.handler('pair', ctx);
+  await events.session_start({}, ctx);
+  try { await commands.remote.handler('pair local', ctx); } finally { Server.prototype.listen = listen; }
   const scale = 4, width = qrLines[0].length * scale, height = qrLines.length * 2 * scale;
   const pixels = new Uint8ClampedArray(width * height * 4).fill(255);
   for (let row = 0; row < qrLines.length; row++) for (let col = 0; col < qrLines[row].length; col++) {

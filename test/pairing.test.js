@@ -18,10 +18,11 @@ test('pairing endpoint requires the right origin, sets a secure cookie and suppo
   extension({ on: (name, fn) => events[name] = fn, registerCommand: (name, command) => commands[name] = command, registerEntryRenderer() {}, appendEntry() {}, sendUserMessage() {} });
   const listen = Server.prototype.listen;
   Server.prototype.listen = function (_port, host, callback) { return listen.call(this, 0, host, callback); };
-  try { await events.session_start({}, ctx); } finally { Server.prototype.listen = listen; }
+  await events.session_start({}, ctx);
   try {
     await commands.remote.handler('share laptop.test.ts.net', ctx);
-    await commands.remote.handler('pair', ctx);
+    await commands.remote.handler('pair local', ctx);
+    Server.prototype.listen = listen;
     const raw = (path, headers, body) => new Promise((resolve, reject) => {
       const req = request(url + path, { method: body === undefined ? 'GET' : 'POST', headers }, res => { res.resume(); resolve({ status: res.statusCode, headers: res.headers }); });
       req.on('error', reject); req.end(body === undefined ? undefined : JSON.stringify(body));
@@ -39,5 +40,5 @@ test('pairing endpoint requires the right origin, sets a secure cookie and suppo
     assert.equal((await raw('/api/session', { host: base.host, cookie })).status, 200);
     await commands.remote.handler('devices', ctx);
     assert.equal((await raw('/api/session', { host: base.host, cookie })).status, 401);
-  } finally { await events.session_shutdown(); await rm(dir, { recursive: true, force: true }); }
+  } finally { Server.prototype.listen = listen; await events.session_shutdown(); await rm(dir, { recursive: true, force: true }); }
 });

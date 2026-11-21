@@ -8,12 +8,14 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Pairing } from "./auth.ts";
+import { prepareTailscale } from "./tailscale.ts";
 
 const page = fileURLToPath(new URL("../../web/index.html", import.meta.url));
 const require = createRequire(import.meta.url);
 const QRCode: typeof import("qrcode") = require("qrcode");
 const execFileAsync = promisify(execFile);
 const port = 18789;
+const localPort = 18790;
 const stateDir = join(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), "pi-pocket");
 const disabledFile = join(stateDir, "remote-disabled");
 const originFile = join(stateDir, "tailscale-origin");
@@ -30,6 +32,7 @@ function display(message: any): DisplayMessage | undefined {
 
 export default function (pi: ExtensionAPI) {
   let server: Server | undefined;
+  let localServer: Server | undefined;
   let messages: DisplayMessage[] = [];
   let streaming: DisplayMessage | undefined;
   let waiting: { kind: string; title?: string } | undefined;
@@ -39,13 +42,32 @@ export default function (pi: ExtensionAPI) {
   let pairing = new Pairing(stateDir);
   let remoteOrigin: string | undefined;
   let disconnectingTailscale = false;
+  let sessionActive = false;
+  let generation = 0;
+  let localEnabled = false;
+  let remoteEnabled = false;
+  let starting = false;
 
   function stopServer() {
+    generation++;
+    localEnabled = false;
+    remoteEnabled = false;
     if (queueTimer) clearInterval(queueTimer);
     queueTimer = undefined;
-    const active = server;
+    const active = [server, localServer];
     server = undefined;
-    if (active) { active.close(); active.closeAllConnections(); }
+    localServer = undefined;
+    for (const listener of active) if (listener) { listener.close(); listener.closeAllConnections(); }
+  }
+
+  async function ensureEnabled() {
+    if (!sessionActive || disabled) throw new Error("Pi Pocket is disabled. Use /remote enable first.");
+    try {
+      await readFile(disabledFile);
+      disabled = true;
+      stopServer();
+      throw new Error("Pi Pocket is disabled. Use /remote enable first.");
+    } catch (error: any) { if (error.code !== "ENOENT") throw error; }
   }
 
   function tool(id: string) {
@@ -85,13 +107,38 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("remote", {
-    description: "Show address; use /remote pair or /remote devices to manage browser access",
+    description: "Show the local address; use /remote pair for Tailscale access",
     handler: async (args, ctx) => {
       const input = args.trim();
-      if (input === "pair") {
-        const address = server?.address();
-        if (!address || typeof address === "string") { ctx.ui.notify("Pi Pocket is not running.", "error"); return; }
-        const origin = remoteOrigin || `http://127.0.0.1:${address.port}`;
+      if (input === "pair" || input === "pair local") {
+        if (!sessionActive) { ctx.ui.notify("Pi Pocket is not available in this session.", "error"); return; }
+        if (disabled) { ctx.ui.notify("Pi Pocket is disabled. Use /remote enable first.", "error"); return; }
+        let origin: string | undefined;
+        let reserved = false;
+        try {
+          await ensureEnabled();
+          await startServer(ctx, false, false);
+          reserved = true;
+          if (input === "pair") remoteEnabled = false;
+          const startingGeneration = generation;
+          if (input === "pair") {
+            ctx.ui.notify("Preparing private Tailscale access…", "info");
+            origin = await prepareTailscale(port);
+            if (!sessionActive || disabled || generation !== startingGeneration) throw new Error("Pi Pocket stopped during setup.");
+            await mkdir(stateDir, { recursive: true, mode: 0o700 });
+            await writeFile(originFile, origin, { mode: 0o600 });
+            if (!sessionActive || disabled || generation !== startingGeneration) throw new Error("Pi Pocket stopped during setup.");
+            remoteOrigin = origin;
+          }
+          await startServer(ctx, false);
+          const address = server?.address();
+          if (!address || typeof address === "string") throw new Error("Pi Pocket is not running.");
+          origin ??= `http://127.0.0.1:${address.port}`;
+        } catch (error) {
+          if (reserved && !localEnabled && !remoteEnabled) stopServer();
+          ctx.ui.notify(`Pi Pocket could not start pairing: ${error}\nCheck Tailscale Serve on the laptop before retrying.`, "error");
+          return;
+        }
         const code = pairing.issue();
         const qr = QRCode.create(`${origin}/pair#pair=${code}`, { errorCorrectionLevel: "L" });
         const size = qr.modules.size + 8;
@@ -109,12 +156,15 @@ export default function (pi: ExtensionAPI) {
             const codeWidth = Math.max(1, width - 6);
             const codeLines: string[] = [];
             for (let i = 0; i < code.length; i += codeWidth) codeLines.push(`${i ? "      " : "Code: "}${code.slice(i, i + codeWidth)}`.slice(0, width));
+            const addressLines: string[] = [];
+            const addressWidth = Math.max(1, width - 9);
+            for (let i = 0; i < origin.length; i += addressWidth) addressLines.push(`${i ? "         " : "Address: "}${origin.slice(i, i + addressWidth)}`.slice(0, width));
             const fits = width >= size && height >= rows.length + 1;
             if (fits && !showCode) {
-              const title = remoteOrigin ? "Scan QR · c: code · Esc: close · expires in 2 min" : "Local pairing · c: code · Esc: close · expires in 2 min";
-              return [theme.fg("accent", title.slice(0, width)), ...rows, ...(height >= rows.length + codeLines.length + 3 ? [...codeLines, "Open the Pi Pocket address to enter the code.".slice(0, width), "Enter or Esc to close".slice(0, width)] : [])];
+              const title = origin.startsWith("https://") ? "Scan QR · c: code · Esc: close · expires in 2 min" : "Local pairing · c: code · Esc: close · expires in 2 min";
+              return [theme.fg("accent", title.slice(0, width)), ...rows, ...(height >= rows.length + codeLines.length + addressLines.length + 2 ? [...codeLines, ...addressLines, "Enter or Esc to close".slice(0, width)] : [])];
             }
-            return [theme.fg("accent", "Pairing code · expires in 2 minutes".slice(0, width)), ...codeLines, "Open the Pi Pocket address to enter this code.".slice(0, width), (fits ? "c: QR · Esc: close" : "Enlarge terminal for QR · Esc: close").slice(0, width)];
+            return [theme.fg("accent", "Pairing code · expires in 2 minutes".slice(0, width)), ...codeLines, ...addressLines, (fits ? "c: QR · Esc: close" : "Enlarge terminal for QR · Esc: close").slice(0, width)];
           },
           handleInput(data) {
             if (data === "c") { showCode = !showCode; tui.requestRender(); }
@@ -162,24 +212,41 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       if (input === "enable") {
-        if (server) { ctx.ui.notify("Pi Remote is already running", "info"); return; }
         try {
-          await startServer(ctx);
           await unlink(join(ctx.cwd, ".pi", "remote-disabled")).catch((error) => { if (error.code !== "ENOENT") throw error; });
           await unlink(disabledFile).catch((error) => { if (error.code !== "ENOENT") throw error; });
           disabled = false;
-        } catch (error) {
-          stopServer();
-          ctx.ui.notify(`Pi Remote could not start: ${error}`, "error");
-        }
+          ctx.ui.notify("Pi Pocket enabled. Use /remote for local access or /remote pair for Tailscale.", "info");
+        } catch (error) { ctx.ui.notify(`Pi Pocket could not enable: ${error}`, "error"); }
         return;
       }
-      const address = server?.address();
-      ctx.ui.notify(address && typeof address !== "string" ? `Pi Pocket: http://127.0.0.1:${address.port}${remoteOrigin ? `\nTailscale: ${remoteOrigin}` : ""}\nUse /remote pair to pair a browser; /remote devices to revoke one.` : "Pi Remote is not running", "info");
+      if (input) { ctx.ui.notify("Use /remote for local access, /remote pair for Tailscale, or /remote devices to manage browsers.", "info"); return; }
+      if (disabled) { ctx.ui.notify("Pi Pocket is disabled. Use /remote enable first.", "error"); return; }
+      try { await startServer(ctx, true); }
+      catch (error) { ctx.ui.notify(`Pi Pocket could not start: ${error}`, "error"); return; }
+      const address = localServer?.address();
+      ctx.ui.notify(address && typeof address !== "string" ? `Pi Pocket: http://127.0.0.1:${address.port}\nUse /remote pair for Tailscale access.` : "Pi Pocket is not running", "info");
     },
   });
 
-  async function startServer(ctx: import("@earendil-works/pi-coding-agent").ExtensionContext) {
+  async function startServer(ctx: import("@earendil-works/pi-coding-agent").ExtensionContext, isLocal: boolean, activate = true) {
+    await ensureEnabled();
+    const startingGeneration = generation;
+    if (starting) throw new Error("Pi Pocket is already starting. Try again.");
+    if (server && localServer) {
+      if (activate) {
+        if (isLocal) localEnabled = true; else remoteEnabled = true;
+        const address = (isLocal ? localServer : server).address();
+        if (address && typeof address !== "string") ctx.ui.notify(`${isLocal ? "Pi Pocket local" : "Pi Remote"}: http://127.0.0.1:${address.port}`, "info");
+      }
+      return;
+    }
+    starting = true;
+    try { await startListeners(ctx, isLocal, startingGeneration, activate); }
+    finally { starting = false; }
+  }
+
+  async function startListeners(ctx: import("@earendil-works/pi-coding-agent").ExtensionContext, isLocal: boolean, startingGeneration: number, activate: boolean) {
     pairing = new Pairing(stateDir);
     const [html, pairPage, marked, dompurify, highlight] = await Promise.all([
       readFile(page),
@@ -188,22 +255,22 @@ export default function (pi: ExtensionAPI) {
       readFile(join(dirname(require.resolve("dompurify")), "purify.min.js")),
       readFile(require.resolve("@highlightjs/cdn-assets/highlight.min.js")),
     ]);
-    server = createServer(async (req, res) => {
+    const handler = (isLocal: boolean) => async (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => {
       const host = req.headers.host;
-      const address = server?.address();
+      const address = (isLocal ? localServer : server)?.address();
       const expectedHost = typeof address === "object" && address ? `127.0.0.1:${address.port}` : "";
       const localOrigin = `http://${expectedHost}`;
-      const requestOrigin = host === expectedHost ? localOrigin : remoteOrigin && host === new URL(remoteOrigin).host ? remoteOrigin : undefined;
+      const requestOrigin = host === expectedHost ? localOrigin : !isLocal && remoteOrigin && host === new URL(remoteOrigin).host ? remoteOrigin : undefined;
       if (!requestOrigin || (req.headers.origin && req.headers.origin !== requestOrigin)) {
         res.writeHead(403).end();
         return;
       }
-      if (disabled) { res.writeHead(503).end("Pi Remote disabled"); return; }
+      if (disabled || (isLocal ? !localEnabled : !remoteEnabled)) { res.writeHead(503).end("Pi Pocket is not active for this address."); return; }
       res.setHeader("Cache-Control", "no-store");
       const cookieName = requestOrigin === localOrigin ? "pi-pocket-local" : "__Host-pi-pocket";
       const cookie = req.headers.cookie?.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
       const browser = pairing.identify(cookie);
-      if (req.method === "POST" && req.url === "/api/pair") {
+      if (!isLocal && req.method === "POST" && req.url === "/api/pair") {
         if (req.headers.origin !== requestOrigin || req.headers["content-type"] !== "application/json") { res.writeHead(403).end(); return; }
         let body = "";
         for await (const chunk of req) { body += chunk; if (body.length > 1024) { res.writeHead(413).end(); return; } }
@@ -220,8 +287,8 @@ export default function (pi: ExtensionAPI) {
       }
       if (req.method === "GET" && (req.url === "/" || req.url === "/pair")) {
         res.setHeader("Referrer-Policy", "no-referrer");
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(browser && req.url === "/" ? html : pairPage);
-      } else if (!browser) {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(isLocal || (browser && req.url === "/") ? html : pairPage);
+      } else if (!isLocal && !browser) {
         res.writeHead(401).end("Pair this browser using /remote pair on the laptop.");
       } else if (req.method === "GET" && (req.url === "/marked.js" || req.url === "/purify.js" || req.url === "/highlight.js")) {
         res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" }).end(req.url === "/marked.js" ? marked : req.url === "/purify.js" ? dompurify : highlight);
@@ -232,6 +299,7 @@ export default function (pi: ExtensionAPI) {
           waiting,
           queued: queued.length,
           browser,
+          local: isLocal,
         }));
       } else if (req.method === "POST" && req.url === "/api/prompt") {
         if (req.headers.origin !== requestOrigin || req.headers["content-type"] !== "application/json") {
@@ -247,7 +315,7 @@ export default function (pi: ExtensionAPI) {
           const { text } = JSON.parse(body);
           if (typeof text !== "string" || !text.trim()) throw new Error("Empty prompt");
           if (disabled) { res.writeHead(503).end("Pi Remote disabled"); return; }
-          queued.push({ text: text.trim(), via: requestOrigin === remoteOrigin ? "tailscale" : "local" });
+          queued.push({ text: text.trim(), via: !isLocal && requestOrigin === remoteOrigin ? "tailscale" : "local" });
           res.writeHead(202).end();
         } catch {
           res.writeHead(400).end("Invalid prompt");
@@ -315,15 +383,26 @@ export default function (pi: ExtensionAPI) {
       } else {
         res.writeHead(404).end();
       }
-    });
-    server.on("error", (error) => ctx.ui.notify(`Pi Remote: ${error.message}`, "error"));
-    await new Promise<void>((resolve, reject) => {
-      server!.once("error", reject);
-      server!.listen(port, "127.0.0.1", () => resolve());
-    });
-    const address = server.address();
-    if (address && typeof address !== "string") ctx.ui.notify(`Pi Remote: http://127.0.0.1:${address.port}`, "info");
-    queueTimer = setInterval(() => {
+    };
+    if (!sessionActive || disabled || generation !== startingGeneration) throw new Error("Pi Pocket stopped during startup.");
+    server = createServer(handler(false));
+    localServer = createServer(handler(true));
+    const remote = server, local = localServer;
+    for (const listener of [remote, local]) listener.on("error", (error) => ctx.ui.notify(`Pi Remote: ${error.message}`, "error"));
+    try {
+      for (const [listener, listenPort] of [[remote, port], [local, localPort]] as const) {
+        await new Promise<void>((resolve, reject) => {
+          listener.once("error", reject);
+          listener.listen(listenPort, "127.0.0.1", () => resolve());
+        });
+      }
+      await ensureEnabled();
+      if (!sessionActive || disabled || generation !== startingGeneration || server !== remote || localServer !== local) throw new Error("Pi Pocket stopped during startup.");
+    } catch (error) { stopServer(); throw error; }
+    if (activate) { if (isLocal) localEnabled = true; else remoteEnabled = true; }
+    const address = (isLocal ? local : remote).address();
+    if (activate && address && typeof address !== "string") ctx.ui.notify(`${isLocal ? "Pi Pocket local" : "Pi Remote"}: http://127.0.0.1:${address.port}`, "info");
+    if (!queueTimer) queueTimer = setInterval(() => {
       if (!disabled && queued.length && ctx.isIdle()) {
         const prompt = queued.shift()!;
         try {
@@ -337,6 +416,8 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.on("session_start", async (_event, ctx) => {
+    sessionActive = true;
+    generation++;
     loadHistory(ctx.sessionManager.getBranch());
     try {
       const configured = await readFile(originFile, "utf8");
@@ -361,7 +442,6 @@ export default function (pi: ExtensionAPI) {
     } catch (error: any) {
       if (error.code !== "ENOENT") throw error;
       disabled = false;
-      await startServer(ctx);
     }
   });
 
@@ -386,6 +466,7 @@ export default function (pi: ExtensionAPI) {
     if (event.message.role === "assistant") streaming = undefined;
   });
   pi.on("session_shutdown", async () => {
+    sessionActive = false;
     queued = [];
     stopServer();
   });
