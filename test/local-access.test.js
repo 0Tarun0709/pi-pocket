@@ -93,12 +93,12 @@ test('another session cannot bypass an all-stop made after it started', async ()
     await first.commands.remote.handler('', ctx);
     assert.ok(localUrl);
     const list = async () => (await fetch(localUrl + '/api/sessions')).json();
-    assert.deepEqual((await list()).map(session => session.name), ['First']);
-    await second.commands.remote.handler('', secondCtx);
-    assert.match(notices.at(-1), /added to the existing/);
     const entries = await list();
     assert.deepEqual(entries.map(session => session.name), ['First', 'Second']);
     const path = `/api/sessions/${entries[1].id}`;
+    const remote = `http://127.0.0.1:${ports[18789]}`;
+    assert.equal((await fetch(remote + '/api/sessions')).status, 503);
+    assert.equal((await fetch(remote + path + '/session')).status, 503);
     const post = (action, data, origin = localUrl) => fetch(localUrl + path + '/' + action, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify(data) });
     assert.equal((await fetch(localUrl + '/?session=' + entries[1].id)).status, 200);
     const state = async () => (await fetch(localUrl + path + '/session')).json();
@@ -115,7 +115,7 @@ test('another session cannot bypass an all-stop made after it started', async ()
     assert.deepEqual((await list()).map(session => session.name), ['First']);
     assert.equal((await fetch(localUrl + path + '/session')).status, 404);
     await second.events.session_start({}, secondCtx);
-    await second.commands.remote.handler('', secondCtx);
+    assert.deepEqual((await list()).map(session => session.name), ['First', 'Second']);
     await second.commands.remote.handler('pair', secondCtx);
     assert.match(notices.at(-1), /session hosting the PockPi gateway/);
     await assert.rejects(readFile(called), { code: 'ENOENT' });
@@ -129,6 +129,11 @@ test('another session cannot bypass an all-stop made after it started', async ()
     assert.match(notices.at(-1), /disabled/);
     await assert.rejects(readFile(called), { code: 'ENOENT' });
     await assert.rejects(fetch(localUrl));
+    await first.commands.remote.handler('enable', ctx);
+    await first.commands.remote.handler('', ctx);
+    assert.deepEqual((await list()).map(session => session.name), ['First', 'Second']);
+    const revived = (await list()).find(session => session.name === 'Second');
+    assert.equal((await (await fetch(localUrl + '/api/sessions/' + revived.id + '/session')).json()).queued, 0);
   } finally {
     process.env.PATH = oldPath;
     Server.prototype.listen = original;

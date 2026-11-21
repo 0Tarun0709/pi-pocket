@@ -78,7 +78,7 @@ function filterSessions() {
   }
   sessionList.hidden = !matches;
   sessionEmpty.hidden = Boolean(matches);
-  sessionEmpty.textContent = sessionList.children.length ? 'No matching sessions.' : 'No shared sessions. Run /remote in Pi to share one.';
+  sessionEmpty.textContent = sessionList.children.length ? 'No matching sessions.' : 'No running sessions with PockPi loaded.';
 }
 sessionSearch.addEventListener('input', () => { if (lastSessions !== undefined) filterSessions(); });
 const selectedSession = new URLSearchParams(location.search).get('session');

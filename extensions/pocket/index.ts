@@ -45,6 +45,7 @@ export default function (pi: ExtensionAPI) {
   let thinking: ThinkingMessage | undefined;
   let waiting: { kind: string; title?: string } | undefined;
   let disabled = false;
+  let observedLock = false;
   let queued: { text: string; via: "tailscale" | "local" }[] = [];
   let queueTimer: ReturnType<typeof setInterval> | undefined;
   let pairing = new Pairing(stateDir);
@@ -61,10 +62,6 @@ export default function (pi: ExtensionAPI) {
     generation++;
     localEnabled = false;
     remoteEnabled = false;
-    if (queueTimer) clearInterval(queueTimer);
-    queueTimer = undefined;
-    shared?.close();
-    shared = undefined;
     const active = [server, localServer];
     server = undefined;
     localServer = undefined;
@@ -75,8 +72,6 @@ export default function (pi: ExtensionAPI) {
     if (!sessionActive || disabled) throw new Error("PockPi is disabled. Use /remote enable first.");
     try {
       await readFile(disabledFile);
-      disabled = true;
-      stopServer();
       throw new Error("PockPi is disabled. Use /remote enable first.");
     } catch (error: any) { if (error.code !== "ENOENT") throw error; }
   }
@@ -237,6 +232,7 @@ export default function (pi: ExtensionAPI) {
           await unlink(join(ctx.cwd, ".pi", "remote-disabled")).catch((error) => { if (error.code !== "ENOENT") throw error; });
           await unlink(disabledFile).catch((error) => { if (error.code !== "ENOENT") throw error; });
           disabled = false;
+          observedLock = false;
           ctx.ui.notify("PockPi enabled. Use /remote for local access or /remote pair for Tailscale.", "info");
         } catch (error) { ctx.ui.notify(`PockPi could not enable: ${error}`, "error"); }
         return;
@@ -246,7 +242,7 @@ export default function (pi: ExtensionAPI) {
       try { await startServer(ctx, true); }
       catch (error) { ctx.ui.notify(`PockPi could not start: ${error}`, "error"); return; }
       const address = localServer?.address();
-      ctx.ui.notify(address && typeof address !== "string" ? `PockPi is available at http://127.0.0.1:${address.port}\nUse /remote pair for Tailscale access.` : "Session added to the existing PockPi gateway. Open Sessions on your connected device.", "info");
+      ctx.ui.notify(address && typeof address !== "string" ? `PockPi is available at http://127.0.0.1:${address.port}\nUse /remote pair for Tailscale access.` : "PockPi is already running. Open Sessions on your connected device.", "info");
     },
   });
 
@@ -284,24 +280,59 @@ export default function (pi: ExtensionAPI) {
       Promise.all([...assets].map(async ([url, path]) => [url, path.endsWith(".ts") ? stripTypeScriptTypes(await readFile(path, "utf8")) : await readFile(path)] as const)),
     ]);
     const staticFiles = new Map(assetBodies);
+    const handler = createHandler(ctx, { html, pairPage, staticFiles });
+    if (!sessionActive || disabled || generation !== startingGeneration) throw new Error("PockPi stopped during startup.");
+    const handle = (isLocal: boolean) => {
+      const route = handler(isLocal);
+      return (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => {
+        void route(req, res).catch(() => { if (!res.headersSent) res.writeHead(500).end(); else res.destroy(); });
+      };
+    };
+    server = createServer(handle(false));
+    localServer = createServer(handle(true));
+    const remote = server, local = localServer;
+    for (const listener of [remote, local]) listener.on("error", (error) => ctx.ui.notify(`PockPi: ${error.message}`, "error"));
+    try {
+      for (const [listener, listenPort] of [[remote, port], [local, localPort]] as const) {
+        await new Promise<void>((resolve, reject) => {
+          listener.once("error", reject);
+          listener.listen(listenPort, "127.0.0.1", () => resolve());
+        });
+      }
+      await ensureEnabled();
+      if (!sessionActive || disabled || generation !== startingGeneration || server !== remote || localServer !== local) throw new Error("PockPi stopped during startup.");
+    } catch (error) {
+      for (const listener of [remote, local]) { listener.close(); listener.closeAllConnections(); }
+      server = localServer = undefined;
+      if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
+      const gateway = (await listSessions(directory)).find(session => session.gateway);
+      if (!gateway) throw error;
+      if (!isLocal || !activate) throw new Error("Run /remote pair in the Pi session hosting the PockPi gateway.");
+    }
+    if (activate && server) { if (isLocal) localEnabled = true; else remoteEnabled = true; }
+    const address = (isLocal ? local : remote).address();
+    if (activate && address && typeof address !== "string") ctx.ui.notify(`${isLocal ? "PockPi local" : "PockPi"}: http://127.0.0.1:${address.port}`, "info");
+
+  }
+
+  function createHandler(ctx: import("@earendil-works/pi-coding-agent").ExtensionContext, assets?: {
+    html: Buffer; pairPage: Buffer; staticFiles: Map<string, string | Buffer>;
+  }) {
     const availableModels = () => {
       const available = ctx.modelRegistry.getAvailable();
       const scoped = ctx.scopedModels;
       return scoped?.length ? available.filter(model => scoped.some(({ model: entry }) => entry.provider === model.provider && entry.id === model.id)) : available;
     };
-    const handler = (isLocal: boolean, internal = false) => async (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => {
+    return (isLocal: boolean, internal = false) => async (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => {
       const url = (req.url ?? "").split("?", 1)[0];
       if (internal && req.method === "POST" && url === "/internal/stop-all") {
         if (!existsSync(disabledFile)) { res.writeHead(403).end(); return; }
-        disabled = true;
-        queued = [];
-        res.once("finish", stopServer);
-        ctx.abort();
+        observeStopLock(ctx);
         res.writeHead(204).end();
         return;
       }
       if (internal && (!shared || !sessionActive || disabled || existsSync(disabledFile))) { res.writeHead(503).end(); return; }
-      const info = () => ({ name: ctx.sessionManager.getSessionName?.() || (shared && !localServer ? basename(ctx.cwd) : "Current session"), project: basename(ctx.cwd), busy: !ctx.isIdle(), waiting: Boolean(waiting), gateway: Boolean(server?.listening) });
+      const info = () => ({ name: ctx.sessionManager.getSessionName?.() || basename(ctx.cwd), project: basename(ctx.cwd), busy: !ctx.isIdle(), waiting: Boolean(waiting), gateway: Boolean(server?.listening) });
       if (internal && req.method === "GET" && url === "/internal/info") { res.writeHead(200).end(JSON.stringify(info())); return; }
       if (internal && !/^(GET \/api\/(session|models)|POST \/api\/(prompt|stop|model))$/.test(`${req.method} ${url}`)) { res.writeHead(404).end(); return; }
       const host = req.headers.host;
@@ -336,9 +367,9 @@ export default function (pi: ExtensionAPI) {
       }
       if (req.method === "GET" && (url === "/" || url === "/pair")) {
         res.setHeader("Referrer-Policy", "no-referrer");
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(isLocal || (browser && url === "/") ? html : pairPage);
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(isLocal || (browser && url === "/") ? assets?.html : assets?.pairPage);
       } else if (!internal && req.method === "GET" && url === "/pair.js") {
-        res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" }).end(staticFiles.get(url));
+        res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" }).end(assets?.staticFiles.get(url));
       } else if (!internal && !isLocal && !browser) {
         res.writeHead(401).end("Pair this browser using /remote pair on the laptop.");
       } else if (!internal && req.method === "GET" && url === "/api/sessions") {
@@ -379,9 +410,9 @@ export default function (pi: ExtensionAPI) {
         outgoing.on("error", () => { if (!res.headersSent) res.writeHead(404).end("Session is no longer available."); else res.destroy(); });
         res.on("close", () => outgoing.destroy());
         outgoing.end(body);
-      } else if (req.method === "GET" && staticFiles.has(url)) {
+      } else if (req.method === "GET" && assets?.staticFiles.has(url)) {
         const type = url.endsWith(".css") ? "text/css" : "text/javascript";
-        res.writeHead(200, { "Content-Type": `${type}; charset=utf-8` }).end(staticFiles.get(url));
+        res.writeHead(200, { "Content-Type": `${type}; charset=utf-8` }).end(assets?.staticFiles.get(url));
       } else if (req.method === "GET" && req.url === "/api/session") {
         res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({
           messages: streaming ? [...messages, streaming] : messages,
@@ -509,46 +540,30 @@ export default function (pi: ExtensionAPI) {
         res.writeHead(404).end();
       }
     };
-    if (!sessionActive || disabled || generation !== startingGeneration) throw new Error("PockPi stopped during startup.");
-    const startWorker = async () => {
-      if (shared) return;
-      const worker = await openSession(directory, (req, res) => { void handler(false, true)(req, res).catch(() => { if (!res.headersSent) res.writeHead(500).end(); else res.destroy(); }); });
-      if (!sessionActive || disabled || existsSync(disabledFile) || generation !== startingGeneration) { worker.close(); throw new Error("PockPi stopped during startup."); }
-      shared = worker;
-    };
-    const handle = (isLocal: boolean) => {
-      const route = handler(isLocal);
-      return (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => {
-        void route(req, res).catch(() => { if (!res.headersSent) res.writeHead(500).end(); else res.destroy(); });
-      };
-    };
-    server = createServer(handle(false));
-    localServer = createServer(handle(true));
-    const remote = server, local = localServer;
-    for (const listener of [remote, local]) listener.on("error", (error) => ctx.ui.notify(`PockPi: ${error.message}`, "error"));
-    try {
-      for (const [listener, listenPort] of [[remote, port], [local, localPort]] as const) {
-        await new Promise<void>((resolve, reject) => {
-          listener.once("error", reject);
-          listener.listen(listenPort, "127.0.0.1", () => resolve());
-        });
+  }
+
+  function observeStopLock(ctx: import("@earendil-works/pi-coding-agent").ExtensionContext) {
+    const locked = existsSync(disabledFile);
+    if (locked && !observedLock) {
+      observedLock = true;
+      queued = [];
+      if (!disabled) {
+        stopServer();
+        ctx.abort();
       }
-      await ensureEnabled();
-      if (!sessionActive || disabled || generation !== startingGeneration || server !== remote || localServer !== local) throw new Error("PockPi stopped during startup.");
-    } catch (error) {
-      for (const listener of [remote, local]) { listener.close(); listener.closeAllConnections(); }
-      server = localServer = undefined;
-      if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
-      const gateway = (await listSessions(directory)).find(session => session.gateway);
-      if (!gateway) throw error;
-      if (!isLocal || !activate) throw new Error("Run /remote pair in the Pi session hosting the PockPi gateway.");
-    }
-    try { await startWorker(); } catch (error) { stopServer(); throw error; }
-    if (activate && server) { if (isLocal) localEnabled = true; else remoteEnabled = true; }
-    const address = (isLocal ? local : remote).address();
-    if (activate && address && typeof address !== "string") ctx.ui.notify(`${isLocal ? "PockPi local" : "PockPi"}: http://127.0.0.1:${address.port}`, "info");
+    } else if (!locked) observedLock = false;
+    return locked;
+  }
+
+  async function startWorker(ctx: import("@earendil-works/pi-coding-agent").ExtensionContext) {
+    const route = createHandler(ctx)(false, true);
+    const worker = await openSession(directory, (req, res) => {
+      void route(req, res).catch(() => { if (!res.headersSent) res.writeHead(500).end(); else res.destroy(); });
+    });
+    if (!sessionActive) { worker.close(); return; }
+    shared = worker;
     if (!queueTimer) queueTimer = setInterval(() => {
-      if (!disabled && existsSync(disabledFile)) { disabled = true; queued = []; stopServer(); ctx.abort(); return; }
+      if (observeStopLock(ctx)) return;
       if (!disabled && !changingModel && queued.length && ctx.isIdle()) {
         const prompt = queued.shift()!;
         try {
@@ -582,13 +597,15 @@ export default function (pi: ExtensionAPI) {
       } catch (error: any) {
         if (error.code !== "ENOENT") throw error;
       }
-      await readFile(disabledFile);
-      disabled = true;
-      ctx.ui.notify("PockPi disabled. Use /remote enable to restart.", "info");
-    } catch (error: any) {
-      if (error.code !== "ENOENT") throw error;
-      disabled = false;
+    } catch (error) {
+      ctx.ui.notify(`PockPi could not migrate its local stop lock: ${error}`, "error");
+      return;
     }
+    disabled = false;
+    observedLock = existsSync(disabledFile);
+    if (observedLock) ctx.ui.notify("PockPi disabled. Use /remote enable to restart.", "info");
+    try { await startWorker(ctx); }
+    catch (error) { ctx.ui.notify(`PockPi could not register this session: ${error}`, "error"); }
   });
 
   pi.on("session_tree", async (_event, ctx) => { loadHistory(ctx.sessionManager.getBranch()); });
@@ -632,5 +649,9 @@ export default function (pi: ExtensionAPI) {
     sessionActive = false;
     queued = [];
     stopServer();
+    if (queueTimer) clearInterval(queueTimer);
+    queueTimer = undefined;
+    shared?.close();
+    shared = undefined;
   });
 }

@@ -27,6 +27,7 @@ export async function openSession(directory: string, handler: (req: IncomingMess
     server.once("error", reject);
     Server.prototype.listen.call(server, { path: socket }, resolve);
   });
+  server.unref();
   return { id, close() { server.close(); server.closeAllConnections(); } };
 }
 
