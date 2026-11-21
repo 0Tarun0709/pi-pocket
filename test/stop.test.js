@@ -9,8 +9,9 @@ import { Server } from 'node:http';
 test('all-stop aborts, discards remote queue and stays disabled until enabled locally', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pi-remote-test-'));
   await mkdir(join(dir, '.pi/extensions'), { recursive: true });
+  await mkdir(join(dir, 'web'));
   await copyFile('.pi/extensions/remote.ts', join(dir, '.pi/extensions/remote.ts'));
-  await copyFile('index.html', join(dir, 'index.html'));
+  await copyFile('web/index.html', join(dir, 'web/index.html'));
   await symlink(resolve('node_modules'), join(dir, 'node_modules'));
   const { default: extension } = await import(pathToFileURL(join(dir, '.pi/extensions/remote.ts')));
   const events = {}, commands = {};

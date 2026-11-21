@@ -3,7 +3,7 @@ import { readFile, writeFile, unlink } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-const page = fileURLToPath(new URL("../../index.html", import.meta.url));
+const page = fileURLToPath(new URL("../../web/index.html", import.meta.url));
 const port = 18789;
 const disabledFile = fileURLToPath(new URL("../remote-disabled", import.meta.url));
 
