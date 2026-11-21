@@ -1,6 +1,6 @@
 # Pi Pocket
 
-[![Project version](https://img.shields.io/github/package-json/v/0Tarun0709/pi-pocket?label=version)](package.json)
+[![npm version](https://img.shields.io/npm/v/%400tarun0709%2Fpi-pocket)](https://www.npmjs.com/package/@0tarun0709/pi-pocket)
 [![Pi >1.0.0](https://img.shields.io/badge/Pi-%3E1.0.0-blue)](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
 [![Node.js 24 or newer](https://img.shields.io/badge/node-%3E%3D24-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -14,8 +14,10 @@ See the [changelog](CHANGELOG.md) for release history.
 Requires Pi and Node.js 24 or newer.
 
 ```sh
-pi install git:github.com/0Tarun0709/pi-pocket
+pi install npm:@0tarun0709/pi-pocket
 ```
+
+Alternatively, install from Git with `pi install git:github.com/0Tarun0709/pi-pocket`.
 
 Restart Pi or run `/reload`. Pi Pocket does not start a server until you request access.
 

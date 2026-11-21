@@ -1,7 +1,9 @@
 {
-  "name": "pi-pocket",
-  "version": "0.1.0",
-  "private": true,
+  "name": "@0tarun0709/pi-pocket",
+  "version": "0.1.1",
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "MIT",
   "description": "A local web interface for a running Pi session",
   "keywords": [
