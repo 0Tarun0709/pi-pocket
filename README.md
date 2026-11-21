@@ -1,7 +1,7 @@
 # Pi Pocket
 
 [![Project version](https://img.shields.io/github/package-json/v/0Tarun0709/pi-pocket?label=version)](package.json)
-[![Latest Pi version](https://img.shields.io/npm/v/%40earendil-works%2Fpi-coding-agent?label=Pi%20latest)](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
+[![Pi >1.0.0](https://img.shields.io/badge/Pi-%3E1.0.0-blue)](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
 [![Node.js 24 or newer](https://img.shields.io/badge/node-%3E%3D24-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
