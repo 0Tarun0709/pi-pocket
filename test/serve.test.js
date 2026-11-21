@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Server, request } from 'node:http';
 
-test('disconnects only an exclusive Pi Pocket Serve route and leaves Pi running', async () => {
+test('disconnects only an exclusive Pi Aevin Serve route and leaves Pi running', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pi-pocket-serve-'));
   const bin = join(dir, 'bin');
   await mkdir(bin);
@@ -27,7 +27,7 @@ else process.exit(2);
   const events = {}, commands = {};
   let url, code, aborts = 0;
   const ctx = { cwd: dir, sessionManager: { getBranch: () => [] }, isIdle: () => true, abort: () => aborts++, ui: { notify(message) {
-    if (message.startsWith('Pi Remote: http')) url = message.slice('Pi Remote: '.length);
+    if (message.startsWith('Pi Aevin: http')) url = message.slice('Pi Aevin: '.length);
   }, custom: async factory => { code = factory({}, { fg: (_color, text) => text }, {}, () => {}).render(200).find(line => line.startsWith('Code: ')).slice(6); } } };
   extension({ on: (name, handler) => events[name] = handler, registerCommand: (name, command) => commands[name] = command, registerEntryRenderer() {}, appendEntry() {}, sendUserMessage() {} });
   const listen = Server.prototype.listen;

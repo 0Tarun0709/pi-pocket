@@ -12,8 +12,8 @@ test('local browser needs no pairing, while the existing Tailscale port remains 
   const events = {}, commands = {};
   let localUrl, remoteUrl, remoteReserved, aborts = 0, binds = 0;
   const ctx = { cwd: dir, sessionManager: { getBranch: () => [] }, isIdle: () => false, abort: () => aborts++, ui: { notify(message) {
-    if (message.startsWith('Pi Pocket local: http')) localUrl = message.slice('Pi Pocket local: '.length);
-    if (message.startsWith('Pi Remote: http')) remoteUrl = message.slice('Pi Remote: '.length);
+    if (message.startsWith('Pi Aevin local: http')) localUrl = message.slice('Pi Aevin local: '.length);
+    if (message.startsWith('Pi Aevin: http')) remoteUrl = message.slice('Pi Aevin: '.length);
   }, custom: async () => {} } };
   extension({ on: (name, fn) => events[name] = fn, registerCommand: (name, command) => commands[name] = command, registerEntryRenderer() {}, appendEntry() {}, sendUserMessage() {} });
   const original = Server.prototype.listen;
@@ -80,7 +80,7 @@ test('another session cannot bypass an all-stop made after it started', async ()
   make(first); make(second);
   const ctx = { cwd: dir, sessionManager: { getBranch: () => [] }, isIdle: () => false, abort() {}, ui: { notify(message) {
     notices.push(message);
-    if (message.startsWith('Pi Pocket local: http')) localUrl = message.slice('Pi Pocket local: '.length);
+    if (message.startsWith('Pi Aevin local: http')) localUrl = message.slice('Pi Aevin local: '.length);
   } } };
   const ports = {};
   const original = Server.prototype.listen;

@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-21
+
+### Changed
+
+- Rename Pi Pocket to Pi Aevin and publish as `pi-aevin` on npm.
+- Preserve existing paired browsers and emergency-stop state during the rename.
+
 ## [0.1.2] - 2026-11-21
 
 ### Added
@@ -34,7 +41,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   emergency stop and disable Pi Pocket.
 - Installable Pi package, setup and security documentation, and MIT license.
 
-[Unreleased]: https://github.com/0Tarun0709/pi-pocket/compare/v0.1.2...HEAD
-[0.1.2]: https://github.com/0Tarun0709/pi-pocket/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/0Tarun0709/pi-pocket/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/0Tarun0709/pi-pocket/releases/tag/v0.1.0
+[Unreleased]: https://github.com/0Tarun0709/pi-aevin/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/0Tarun0709/pi-aevin/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/0Tarun0709/pi-aevin/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/0Tarun0709/pi-aevin/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/0Tarun0709/pi-aevin/releases/tag/v0.1.0

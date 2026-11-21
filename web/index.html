@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111411">
-  <title>Pi Pocket</title>
+  <title>Pi Aevin</title>
   <style>
     :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #111411; color: #e9ece6; }
     * { box-sizing: border-box; }
@@ -118,7 +118,7 @@
 <body>
   <div class="app">
     <header>
-      <div class="brand"><div class="logo" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" fill="currentColor"><path d="M0 0 H300 V200 H200 V100 H0 Z"/><path d="M0 100 H100 V200 H200 V300 H100 V400 H0 Z"/><rect x="300" y="200" width="100" height="200"/></svg></div><div><h1>Pi Pocket</h1><p class="subtitle">Your agent, wherever you are</p></div></div>
+      <div class="brand"><div class="logo" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" fill="currentColor"><path d="M0 0 H300 V200 H200 V100 H0 Z"/><path d="M0 100 H100 V200 H200 V300 H100 V400 H0 Z"/><rect x="300" y="200" width="100" height="200"/></svg></div><div><h1>Pi Aevin</h1><p class="subtitle">Your agent, wherever you are</p></div></div>
       <div class="header-actions">
         <span class="badge" id="status">Connecting</span>
         <details class="sessions">
@@ -170,7 +170,7 @@
       button.textContent = busy ? '■' : '↑';
     }
     async function stop(all) {
-      if (all && !confirm('Stop Pi, discard queued web prompts, and disable Pi Pocket? Re-enable it from the laptop with /remote enable.')) return;
+      if (all && !confirm('Stop Pi, discard queued web prompts, and disable Pi Aevin? Re-enable it from the laptop with /remote enable.')) return;
       try {
         const response = await fetch(all ? '/api/stop-all' : '/api/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
         if (!response.ok) throw new Error(await response.text());
@@ -179,7 +179,7 @@
           status.textContent = 'Disabled';
           status.dataset.working = 'false';
           notice.hidden = false;
-          notice.textContent = 'Pi Pocket is disabled. Use /remote enable in the laptop terminal to enable it.';
+          notice.textContent = 'Pi Aevin is disabled. Use /remote enable in the laptop terminal to enable it.';
           button.disabled = true;
         }
       } catch (error) {
@@ -189,7 +189,7 @@
     }
     document.querySelector('#stop-all').addEventListener('click', () => stop(true));
     document.querySelector('#disconnect-tailscale').addEventListener('click', async (event) => {
-      if (!confirm('Turn off Pi Pocket’s Tailscale connection for all devices? Pi will keep running on the laptop.')) return;
+      if (!confirm('Turn off Pi Aevin’s Tailscale connection for all devices? Pi will keep running on the laptop.')) return;
       const control = event.currentTarget;
       control.disabled = true;
       actionNotice = 'Turning off Tailscale access…';
@@ -319,7 +319,7 @@
           if (item.role === 'source') {
             const source = document.createElement('div');
             source.className = 'source-label';
-            source.textContent = item.via === 'tailscale' ? 'Pi Pocket · Tailscale address' : 'Pi Pocket · local address';
+            source.textContent = item.via === 'tailscale' ? 'Pi Aevin · Tailscale address' : 'Pi Aevin · local address';
             return source;
           }
           const message = document.createElement('div');

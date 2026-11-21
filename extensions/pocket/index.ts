@@ -16,6 +16,7 @@ const QRCode: typeof import("qrcode") = require("qrcode");
 const execFileAsync = promisify(execFile);
 const port = 18789;
 const localPort = 18790;
+// Preserve Pi Pocket's existing security state and emergency lock across the rename.
 const stateDir = join(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), "pi-pocket");
 const disabledFile = join(stateDir, "remote-disabled");
 const originFile = join(stateDir, "tailscale-origin");
@@ -61,12 +62,12 @@ export default function (pi: ExtensionAPI) {
   }
 
   async function ensureEnabled() {
-    if (!sessionActive || disabled) throw new Error("Pi Pocket is disabled. Use /remote enable first.");
+    if (!sessionActive || disabled) throw new Error("Pi Aevin is disabled. Use /remote enable first.");
     try {
       await readFile(disabledFile);
       disabled = true;
       stopServer();
-      throw new Error("Pi Pocket is disabled. Use /remote enable first.");
+      throw new Error("Pi Aevin is disabled. Use /remote enable first.");
     } catch (error: any) { if (error.code !== "ENOENT") throw error; }
   }
 
@@ -101,8 +102,8 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerEntryRenderer("pi-pocket-prompt", (entry, _options, theme) => {
     const label = (entry.data as { via?: string } | undefined)?.via === "tailscale"
-      ? "↳ Pi Pocket · Tailscale address"
-      : "↳ Pi Pocket · local address";
+      ? "↳ Pi Aevin · Tailscale address"
+      : "↳ Pi Aevin · local address";
     return { render: (width: number) => [theme.fg("dim", label.slice(0, Math.max(0, width)))], invalidate() {} };
   });
 
@@ -111,8 +112,8 @@ export default function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const input = args.trim();
       if (input === "pair" || input === "pair local") {
-        if (!sessionActive) { ctx.ui.notify("Pi Pocket is not available in this session.", "error"); return; }
-        if (disabled) { ctx.ui.notify("Pi Pocket is disabled. Use /remote enable first.", "error"); return; }
+        if (!sessionActive) { ctx.ui.notify("Pi Aevin is not available in this session.", "error"); return; }
+        if (disabled) { ctx.ui.notify("Pi Aevin is disabled. Use /remote enable first.", "error"); return; }
         let origin: string | undefined;
         let reserved = false;
         try {
@@ -124,19 +125,19 @@ export default function (pi: ExtensionAPI) {
           if (input === "pair") {
             ctx.ui.notify("Preparing private Tailscale access…", "info");
             origin = await prepareTailscale(port);
-            if (!sessionActive || disabled || generation !== startingGeneration) throw new Error("Pi Pocket stopped during setup.");
+            if (!sessionActive || disabled || generation !== startingGeneration) throw new Error("Pi Aevin stopped during setup.");
             await mkdir(stateDir, { recursive: true, mode: 0o700 });
             await writeFile(originFile, origin, { mode: 0o600 });
-            if (!sessionActive || disabled || generation !== startingGeneration) throw new Error("Pi Pocket stopped during setup.");
+            if (!sessionActive || disabled || generation !== startingGeneration) throw new Error("Pi Aevin stopped during setup.");
             remoteOrigin = origin;
           }
           await startServer(ctx, false);
           const address = server?.address();
-          if (!address || typeof address === "string") throw new Error("Pi Pocket is not running.");
+          if (!address || typeof address === "string") throw new Error("Pi Aevin is not running.");
           origin ??= `http://127.0.0.1:${address.port}`;
         } catch (error) {
           if (reserved && !localEnabled && !remoteEnabled) stopServer();
-          ctx.ui.notify(`Pi Pocket could not start pairing: ${error}\nCheck Tailscale Serve on the laptop before retrying.`, "error");
+          ctx.ui.notify(`Pi Aevin could not start pairing: ${error}\nCheck Tailscale Serve on the laptop before retrying.`, "error");
           return;
         }
         const code = pairing.issue();
@@ -176,14 +177,14 @@ export default function (pi: ExtensionAPI) {
       }
       if (input === "devices") {
         const owner = server;
-        if (!owner?.listening) { ctx.ui.notify("Pi Pocket is not running in this session. Manage browsers in the session that owns the server.", "error"); return; }
+        if (!owner?.listening) { ctx.ui.notify("Pi Aevin is not running in this session. Manage browsers in the session that owns the server.", "error"); return; }
         const browsers = pairing.list();
         if (!browsers.length) { ctx.ui.notify("No paired browsers.", "info"); return; }
         const options = browsers.map((browser) => `${browser.label} · ${browser.id} · paired ${browser.created.slice(0, 10)}`);
         const selected = await ctx.ui.select("Select a browser to revoke", options);
         const index = selected ? options.indexOf(selected) : -1;
         if (index >= 0 && await ctx.ui.confirm("Revoke browser?", `This will disconnect ${options[index]}.`)) {
-          if (server !== owner || !owner.listening) { ctx.ui.notify("Pi Pocket stopped; browser was not revoked.", "error"); return; }
+          if (server !== owner || !owner.listening) { ctx.ui.notify("Pi Aevin stopped; browser was not revoked.", "error"); return; }
           pairing.revoke(browsers[index].id);
           ctx.ui.notify("Browser revoked.", "info");
         }
@@ -193,8 +194,8 @@ export default function (pi: ExtensionAPI) {
         try {
           await unlink(originFile).catch((error) => { if (error.code !== "ENOENT") throw error; });
           remoteOrigin = undefined;
-          ctx.ui.notify("Pi Pocket no longer accepts the Tailscale hostname. Disable Tailscale Serve separately.", "info");
-        } catch (error) { ctx.ui.notify(`Pi Pocket could not remove its origin: ${error}`, "error"); }
+          ctx.ui.notify("Pi Aevin no longer accepts the Tailscale hostname. Disable Tailscale Serve separately.", "info");
+        } catch (error) { ctx.ui.notify(`Pi Aevin could not remove its origin: ${error}`, "error"); }
         return;
       }
       if (input.startsWith("share ")) {
@@ -207,8 +208,8 @@ export default function (pi: ExtensionAPI) {
           await mkdir(stateDir, { recursive: true, mode: 0o700 });
           await writeFile(originFile, `https://${hostname}`, { mode: 0o600 });
           remoteOrigin = `https://${hostname}`;
-          ctx.ui.notify(`Pi Pocket accepts ${remoteOrigin}. Run /remote pair to pair a browser.`, "info");
-        } catch (error) { ctx.ui.notify(`Pi Pocket could not save its origin: ${error}`, "error"); }
+          ctx.ui.notify(`Pi Aevin accepts ${remoteOrigin}. Run /remote pair to pair a browser.`, "info");
+        } catch (error) { ctx.ui.notify(`Pi Aevin could not save its origin: ${error}`, "error"); }
         return;
       }
       if (input === "enable") {
@@ -216,28 +217,28 @@ export default function (pi: ExtensionAPI) {
           await unlink(join(ctx.cwd, ".pi", "remote-disabled")).catch((error) => { if (error.code !== "ENOENT") throw error; });
           await unlink(disabledFile).catch((error) => { if (error.code !== "ENOENT") throw error; });
           disabled = false;
-          ctx.ui.notify("Pi Pocket enabled. Use /remote for local access or /remote pair for Tailscale.", "info");
-        } catch (error) { ctx.ui.notify(`Pi Pocket could not enable: ${error}`, "error"); }
+          ctx.ui.notify("Pi Aevin enabled. Use /remote for local access or /remote pair for Tailscale.", "info");
+        } catch (error) { ctx.ui.notify(`Pi Aevin could not enable: ${error}`, "error"); }
         return;
       }
       if (input) { ctx.ui.notify("Use /remote for local access, /remote pair for Tailscale, or /remote devices to manage browsers.", "info"); return; }
-      if (disabled) { ctx.ui.notify("Pi Pocket is disabled. Use /remote enable first.", "error"); return; }
+      if (disabled) { ctx.ui.notify("Pi Aevin is disabled. Use /remote enable first.", "error"); return; }
       try { await startServer(ctx, true); }
-      catch (error) { ctx.ui.notify(`Pi Pocket could not start: ${error}`, "error"); return; }
+      catch (error) { ctx.ui.notify(`Pi Aevin could not start: ${error}`, "error"); return; }
       const address = localServer?.address();
-      ctx.ui.notify(address && typeof address !== "string" ? `Pi Pocket: http://127.0.0.1:${address.port}\nUse /remote pair for Tailscale access.` : "Pi Pocket is not running", "info");
+      ctx.ui.notify(address && typeof address !== "string" ? `Pi Aevin is available at http://127.0.0.1:${address.port}\nUse /remote pair for Tailscale access.` : "Pi Aevin is not running", "info");
     },
   });
 
   async function startServer(ctx: import("@earendil-works/pi-coding-agent").ExtensionContext, isLocal: boolean, activate = true) {
     await ensureEnabled();
     const startingGeneration = generation;
-    if (starting) throw new Error("Pi Pocket is already starting. Try again.");
+    if (starting) throw new Error("Pi Aevin is already starting. Try again.");
     if (server && localServer) {
       if (activate) {
         if (isLocal) localEnabled = true; else remoteEnabled = true;
         const address = (isLocal ? localServer : server).address();
-        if (address && typeof address !== "string") ctx.ui.notify(`${isLocal ? "Pi Pocket local" : "Pi Remote"}: http://127.0.0.1:${address.port}`, "info");
+        if (address && typeof address !== "string") ctx.ui.notify(`${isLocal ? "Pi Aevin local" : "Pi Aevin"}: http://127.0.0.1:${address.port}`, "info");
       }
       return;
     }
@@ -265,7 +266,7 @@ export default function (pi: ExtensionAPI) {
         res.writeHead(403).end();
         return;
       }
-      if (disabled || (isLocal ? !localEnabled : !remoteEnabled)) { res.writeHead(503).end("Pi Pocket is not active for this address."); return; }
+      if (disabled || (isLocal ? !localEnabled : !remoteEnabled)) { res.writeHead(503).end("Pi Aevin is not active for this address."); return; }
       res.setHeader("Cache-Control", "no-store");
       const cookieName = requestOrigin === localOrigin ? "pi-pocket-local" : "__Host-pi-pocket";
       const cookie = req.headers.cookie?.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
@@ -280,7 +281,7 @@ export default function (pi: ExtensionAPI) {
           res.setHeader("Set-Cookie", `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000${requestOrigin === localOrigin ? "" : "; Secure"}`);
           res.writeHead(200).end();
         } catch (error) {
-          ctx.ui.notify(`Pi Pocket pairing failed: ${error}`, "error");
+          ctx.ui.notify(`Pi Aevin pairing failed: ${error}`, "error");
           res.writeHead(400).end("Could not complete pairing. Generate a new code on the laptop.");
         }
         return;
@@ -314,7 +315,7 @@ export default function (pi: ExtensionAPI) {
         try {
           const { text } = JSON.parse(body);
           if (typeof text !== "string" || !text.trim()) throw new Error("Empty prompt");
-          if (disabled) { res.writeHead(503).end("Pi Remote disabled"); return; }
+          if (disabled) { res.writeHead(503).end("Pi Aevin disabled"); return; }
           queued.push({ text: text.trim(), via: !isLocal && requestOrigin === remoteOrigin ? "tailscale" : "local" });
           res.writeHead(202).end();
         } catch {
@@ -341,7 +342,7 @@ export default function (pi: ExtensionAPI) {
               Object.keys(config.TCP?.["443"] ?? {}).join() !== "HTTPS" || config.TCP["443"].HTTPS !== true ||
               !handlers || Object.keys(handlers).join() !== "/" || Object.keys(handlers["/"] ?? {}).join() !== "Proxy" ||
               handlers["/"].Proxy !== `http://127.0.0.1:${port}` || Object.values(config.AllowFunnel ?? {}).some(Boolean)) {
-            res.writeHead(409).end("Serve configuration does not exclusively match Pi Pocket. Check it on the laptop.");
+            res.writeHead(409).end("Serve configuration does not exclusively match Pi Aevin. Check it on the laptop.");
             return;
           }
           await execFileAsync("tailscale", ["serve", "--https=443", "off"], { timeout: 10000, maxBuffer: 1024 * 1024 });
@@ -350,8 +351,8 @@ export default function (pi: ExtensionAPI) {
           await unlink(originFile).catch((error) => { if (error.code !== "ENOENT") throw error; });
           res.writeHead(200).end("Tailscale access turned off.");
         } catch (error) {
-          ctx.ui.notify(`Pi Pocket could not finish disabling Tailscale access: ${error}`, "error");
-          res.writeHead(500).end(routeRemoved ? "Serve is off, but Pi Pocket could not save its settings. Check the laptop." : "Could not turn off Tailscale Serve. Check the laptop.");
+          ctx.ui.notify(`Pi Aevin could not finish disabling Tailscale access: ${error}`, "error");
+          res.writeHead(500).end(routeRemoved ? "Serve is off, but Pi Aevin could not save its settings. Check the laptop." : "Could not turn off Tailscale Serve. Check the laptop.");
         } finally {
           disconnectingTailscale = false;
         }
@@ -370,10 +371,10 @@ export default function (pi: ExtensionAPI) {
           res.once("close", closeOnce);
           try {
             await mkdir(stateDir, { recursive: true, mode: 0o700 });
-            await writeFile(disabledFile, "Pi Remote disabled. Use /remote enable to restart.\n", { mode: 0o600 });
+            await writeFile(disabledFile, "Pi Aevin disabled. Use /remote enable to restart.\n", { mode: 0o600 });
             res.writeHead(200).end();
           } catch (error) {
-            ctx.ui.notify(`Pi Remote disabled, but could not persist the lock: ${error}`, "error");
+            ctx.ui.notify(`Pi Aevin disabled, but could not persist the lock: ${error}`, "error");
             res.writeHead(500).end("Disabled until restart, but could not save the lock");
           }
         } else {
@@ -384,11 +385,11 @@ export default function (pi: ExtensionAPI) {
         res.writeHead(404).end();
       }
     };
-    if (!sessionActive || disabled || generation !== startingGeneration) throw new Error("Pi Pocket stopped during startup.");
+    if (!sessionActive || disabled || generation !== startingGeneration) throw new Error("Pi Aevin stopped during startup.");
     server = createServer(handler(false));
     localServer = createServer(handler(true));
     const remote = server, local = localServer;
-    for (const listener of [remote, local]) listener.on("error", (error) => ctx.ui.notify(`Pi Remote: ${error.message}`, "error"));
+    for (const listener of [remote, local]) listener.on("error", (error) => ctx.ui.notify(`Pi Aevin: ${error.message}`, "error"));
     try {
       for (const [listener, listenPort] of [[remote, port], [local, localPort]] as const) {
         await new Promise<void>((resolve, reject) => {
@@ -397,11 +398,11 @@ export default function (pi: ExtensionAPI) {
         });
       }
       await ensureEnabled();
-      if (!sessionActive || disabled || generation !== startingGeneration || server !== remote || localServer !== local) throw new Error("Pi Pocket stopped during startup.");
+      if (!sessionActive || disabled || generation !== startingGeneration || server !== remote || localServer !== local) throw new Error("Pi Aevin stopped during startup.");
     } catch (error) { stopServer(); throw error; }
     if (activate) { if (isLocal) localEnabled = true; else remoteEnabled = true; }
     const address = (isLocal ? local : remote).address();
-    if (activate && address && typeof address !== "string") ctx.ui.notify(`${isLocal ? "Pi Pocket local" : "Pi Remote"}: http://127.0.0.1:${address.port}`, "info");
+    if (activate && address && typeof address !== "string") ctx.ui.notify(`${isLocal ? "Pi Aevin local" : "Pi Aevin"}: http://127.0.0.1:${address.port}`, "info");
     if (!queueTimer) queueTimer = setInterval(() => {
       if (!disabled && queued.length && ctx.isIdle()) {
         const prompt = queued.shift()!;
@@ -409,7 +410,7 @@ export default function (pi: ExtensionAPI) {
           pi.appendEntry("pi-pocket-prompt", { via: prompt.via });
           messages.push({ role: "source", via: prompt.via });
           pi.sendUserMessage(prompt.text);
-        } catch (error) { queued.unshift(prompt); ctx.ui.notify(`Pi Remote could not send: ${error}`, "error"); }
+        } catch (error) { queued.unshift(prompt); ctx.ui.notify(`Pi Aevin could not send: ${error}`, "error"); }
       }
     }, 250);
     queueTimer.unref();
@@ -432,13 +433,13 @@ export default function (pi: ExtensionAPI) {
       try {
         await readFile(join(ctx.cwd, ".pi", "remote-disabled"));
         await mkdir(stateDir, { recursive: true, mode: 0o700 });
-        await writeFile(disabledFile, "Pi Remote disabled. Use /remote enable to restart.\n", { mode: 0o600 });
+        await writeFile(disabledFile, "Pi Aevin disabled. Use /remote enable to restart.\n", { mode: 0o600 });
       } catch (error: any) {
         if (error.code !== "ENOENT") throw error;
       }
       await readFile(disabledFile);
       disabled = true;
-      ctx.ui.notify("Pi Remote disabled. Use /remote enable to restart.", "info");
+      ctx.ui.notify("Pi Aevin disabled. Use /remote enable to restart.", "info");
     } catch (error: any) {
       if (error.code !== "ENOENT") throw error;
       disabled = false;

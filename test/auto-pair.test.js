@@ -29,7 +29,7 @@ else process.exit(2);
   const events = {}, commands = {}, notices = [];
   let url, localUrl, code, displays = 0;
   const ctx = { cwd: dir, sessionManager: { getBranch: () => [] }, isIdle: () => true, abort() {}, ui: {
-    notify(message) { notices.push(message); if (message.startsWith('Pi Remote: http')) url = message.slice('Pi Remote: '.length); },
+    notify(message) { notices.push(message); if (message.startsWith('Pi Aevin: http')) url = message.slice('Pi Aevin: '.length); },
     custom: async factory => { displays++; code = factory({}, { fg: (_color, text) => text }, {}, () => {}).render(200).find(line => line.startsWith('Code: ')).slice(6); },
   } };
   extension({ on: (name, fn) => events[name] = fn, registerCommand: (name, command) => commands[name] = command, registerEntryRenderer() {}, appendEntry() {}, sendUserMessage() {} });

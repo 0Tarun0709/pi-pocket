@@ -11,7 +11,7 @@ test('pairing endpoint requires the right origin, sets a secure cookie and suppo
   const events = {}, commands = {};
   let url, code;
   const ctx = { cwd: dir, sessionManager: { getBranch: () => [] }, isIdle: () => true, abort() {}, ui: {
-    notify(message) { if (message.startsWith('Pi Remote: http')) url = message.slice('Pi Remote: '.length); },
+    notify(message) { if (message.startsWith('Pi Aevin: http')) url = message.slice('Pi Aevin: '.length); },
     custom: async factory => { code = factory({}, { fg: (_color, text) => text }, {}, () => {}).render(200).find(line => line.startsWith('Code: ')).slice(6); },
     select: async (_title, options) => options[0], confirm: async () => true,
   } };
