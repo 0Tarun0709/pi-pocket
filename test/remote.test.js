@@ -170,6 +170,13 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
     const priorReply = document.querySelector('.markdown h1');
     details.open = true;
     await new Promise(resolve => setTimeout(resolve, 20));
+    const thinking = { role: 'assistant', content: [{ type: 'thinking', thinking: 'not for the browser' }] };
+    const snapshot = () => fetch(url + '/api/session', { headers: { cookie } }).then(r => r.json());
+    await events.message_update({ message: thinking, assistantMessageEvent: { type: 'thinking_start' } });
+    const live = await snapshot();
+    assert.equal(live.messages.at(-1).state, 'running');
+    assert.doesNotMatch(JSON.stringify(live), /not for the browser/);
+    await events.message_end({ message: thinking });
     await events.tool_execution_start({ toolCallId: 'new', toolName: 'bash', args: { command: 'pwd' } });
     await events.tool_execution_end({ toolCallId: 'new', result: { content: [{ type: 'text', text: 'failed' }] }, isError: true });
     await events.tool_execution_start({ toolCallId: 'edit', toolName: 'edit', args: { path: 'file.js' } });
@@ -187,7 +194,9 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
     const groups = document.querySelectorAll('.activity');
     assert.equal(groups[0].open, true);
     assert.equal(groups[1].open, false);
-    assert.match(groups[1].querySelector('summary').textContent, /Ran 1 command.*Edited 1 file/);
+    assert.match(groups[1].querySelector('summary').textContent, /Thought.*Ran 1 command.*Edited 1 file/);
+    assert.equal(groups[1].querySelector('.thinking-step').textContent, 'Thought');
+    assert.doesNotMatch(JSON.stringify(await snapshot()), /not for the browser/);
     assert.match(document.querySelectorAll('.tool summary')[1].textContent, /\$ pwd.*error/);
     assert.match(document.querySelectorAll('.tool summary')[1].textContent, /failed/);
     assert.equal(document.querySelector('.markdown pre code .hljs-title')?.textContent, 'hello');

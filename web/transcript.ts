@@ -1,4 +1,4 @@
-import type { ToolMessage, TextMessage, DisplayMessage } from '../extensions/pocket/index.ts';
+import type { ThinkingMessage, ToolMessage, TextMessage, DisplayMessage } from '../extensions/pocket/index.ts';
 
 declare const hljs: { getLanguage(name: string): unknown; highlightElement(element: HTMLElement): void };
 declare const DOMPurify: typeof import('dompurify').default;
@@ -7,6 +7,8 @@ declare const marked: typeof import('marked').marked;
 declare global {
   var renderTranscript: (root: HTMLElement, scroller: HTMLElement, messages: DisplayMessage[]) => void;
 }
+
+type Activity = ToolMessage | ThinkingMessage;
 
 globalThis.renderTranscript = (() => {
   const openTools = new Set();
@@ -87,7 +89,7 @@ globalThis.renderTranscript = (() => {
     details.append(summary, body);
     return details;
   }
-  function activity(items: ToolMessage[], newest: boolean) {
+  function activity(items: Activity[], newest: boolean) {
     const key = items[0].id;
     const group = document.createElement('details');
     group.className = 'activity';
@@ -102,13 +104,20 @@ globalThis.renderTranscript = (() => {
     group.open = choice.touched ? choice.open : !folded && (live || newest);
     const summary = document.createElement('summary');
     const counts = new Map<string, number>();
-    for (const item of items) counts.set(item.name, (counts.get(item.name) ?? 0) + 1);
+    const thinking = items.some(item => item.role === 'thinking' && item.state === 'running');
+    for (const item of items) {
+      const name = item.role === 'thinking' ? 'thinking' : item.name;
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
     const labels: Record<string, [string, string]> = {
       read: ['Read', 'file'], edit: ['Edited', 'file'], write: ['Wrote', 'file'],
       bash: ['Ran', 'command'], powershell: ['Ran', 'command'], grep: ['Searched', 'pattern'],
       find: ['Searched', 'path'], ls: ['Listed', 'directory'],
     };
-    summary.textContent = [...counts].map(([name, count]) => {
+    const labelText = document.createElement('span');
+    labelText.className = 'activity-summary';
+    labelText.textContent = [...counts].map(([name, count]) => {
+      if (name === 'thinking') return thinking ? 'Thinking' : 'Thought';
       const label = labels[name];
       const noun = label?.[1] ?? 'call';
       const plural = noun === 'directory' ? 'directories' : `${noun}s`;
@@ -131,14 +140,22 @@ globalThis.renderTranscript = (() => {
       meta.append(time);
     }
     meta.append(indicator);
-    summary.append(meta);
+    summary.append(labelText, meta);
     summary.addEventListener('click', event => {
       event.preventDefault();
       choice.touched = true;
       choice.open = group.open = !group.open;
     });
     group.append(summary);
-    for (const item of items) group.append(renderTool(item));
+    for (const item of items) {
+      if (item.role === 'tool') group.append(renderTool(item));
+      else {
+        const row = document.createElement('div');
+        row.className = 'thinking-step';
+        row.textContent = item.state === 'running' ? 'Thinking…' : 'Thought';
+        group.append(row);
+      }
+    }
     return group;
   }
 
@@ -188,15 +205,15 @@ globalThis.renderTranscript = (() => {
       next.push(previous?.value === value ? previous : { key, value, node: create() });
     };
     const latestTurn = messages.findLastIndex(item => item.role === 'user');
-    let tools: ToolMessage[] = [], newest = false;
+    let steps: Activity[] = [], newest = false;
     function flush() {
-      if (!tools.length) return;
-      const items = tools;
-      add(`tools:${items[0].id}`, [items, newest, localStorage.getItem('pockpi-fold-activity')], () => activity(items, newest));
-      tools = [];
+      if (!steps.length) return;
+      const items = steps;
+      add(`activity:${items[0].role}:${items[0].id}`, [items, newest, localStorage.getItem('pockpi-fold-activity')], () => activity(items, newest));
+      steps = [];
     }
     messages.forEach((item, index) => {
-      if (item.role === 'tool') { tools.push(item); newest = index > latestTurn; return; }
+      if (item.role === 'tool' || item.role === 'thinking') { steps.push(item); newest = index > latestTurn; return; }
       flush();
       add(`${item.role}:${index}`, item, () => {
         if (item.role !== 'source') return reply(item);

@@ -26,10 +26,16 @@ h1 { font-size: 16px; letter-spacing: -.02em; }
 .badge::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: #899687; vertical-align: 1px; }
 html .badge[data-working="true"] { color: #196a37; background: #dcfce7; border-color: #86c99d; }
 .badge[data-working="true"]::before { background: #218347; }
-main { flex: 1; overflow-y: auto; padding: 16px 20px; }
-.activity { margin: 10px 0; border: 1px solid var(--border, #465046); border-radius: 10px; }
-.activity > summary { cursor: pointer; padding: 10px 12px; font-size: 13px; color: var(--muted, #a8b4a5); }
-.activity-meta { float: right; display: inline-flex; gap: 8px; margin-inline-start: 8px; }
+main { flex: 1; overflow-y: auto; overflow-anchor: none; padding: 12px clamp(12px, 4vw, 20px); }
+.activity { margin: 12px 0; border: 1px solid var(--border, #465046); border-radius: 8px; }
+.activity > summary { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 40px; cursor: pointer; padding: 8px 10px; font-size: 13px; color: var(--muted, #a8b4a5); list-style: none; }
+.activity > summary::-webkit-details-marker { display: none; }
+.activity > summary::before { content: ''; width: 5px; height: 5px; border: solid currentColor; border-width: 0 1px 1px 0; rotate: -45deg; }
+.activity[open] > summary::before { rotate: 45deg; }
+.activity-summary { overflow-wrap: anywhere; }
+.activity-meta { display: inline-flex; gap: 8px; }
+.activity-time { color: var(--accent, #c5e4a4); }
+.thinking-step { border-top: 1px solid var(--border, #465046); padding: 10px 12px; color: var(--muted, #a8b4a5); font-size: 13px; }
 .activity-time { font-variant-numeric: tabular-nums; }
 .activity-setting { display: block; margin-top: 10px; }
 footer { position: relative; }
@@ -158,5 +164,13 @@ html:not([data-theme="forest"]) :is(button, textarea, select):focus-visible { ou
   .session-drawer[open]::backdrop { animation: backdrop-enter 160ms ease-out both; }
   @keyframes drawer-enter { from { transform: translateX(-100%); } }
   @keyframes backdrop-enter { from { opacity: 0; } }
+}
+@media (max-width: 480px) {
+  header { padding: max(9px, env(safe-area-inset-top)) 12px 9px; }
+  footer { padding: 8px 12px max(10px, env(safe-area-inset-bottom)); }
+  .message { margin-block: 12px; }
+  .message.user { margin-left: 0; }
+  .bubble { padding: 10px 12px; }
+  .activity .tool summary { padding: 10px 12px; }
 }
 @media (max-width: 380px) { .subtitle { display: none; } }

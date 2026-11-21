@@ -26,7 +26,8 @@ const directory = sessionDirectory(stateDir);
 
 export type ToolMessage = { role: "tool"; id: string; name: string; args: unknown; output?: unknown; startedAt?: number; endedAt?: number; state: "running" | "done" | "error" | "unknown" };
 export type TextMessage = { role: "user" | "assistant"; text: string };
-export type DisplayMessage = TextMessage | { role: "source"; via: "tailscale" | "local" } | ToolMessage;
+export type ThinkingMessage = { role: "thinking"; id: string; state: "running" | "done"; startedAt?: number; endedAt?: number };
+export type DisplayMessage = TextMessage | { role: "source"; via: "tailscale" | "local" } | ToolMessage | ThinkingMessage;
 
 function display(message: any): DisplayMessage | undefined {
   if (message?.role !== "user" && message?.role !== "assistant") return;
@@ -41,6 +42,7 @@ export default function (pi: ExtensionAPI) {
   let shared: Awaited<ReturnType<typeof openSession>> | undefined;
   let messages: DisplayMessage[] = [];
   let streaming: DisplayMessage | undefined;
+  let thinking: ThinkingMessage | undefined;
   let waiting: { kind: string; title?: string } | undefined;
   let disabled = false;
   let queued: { text: string; via: "tailscale" | "local" }[] = [];
@@ -83,6 +85,14 @@ export default function (pi: ExtensionAPI) {
     return messages.find((item): item is ToolMessage => item.role === "tool" && item.id === id);
   }
 
+  function addThinking(state: ThinkingMessage["state"]) {
+    // Only send activity metadata, never the contents of a reasoning block.
+    const marker: ThinkingMessage = { role: "thinking", id: `thinking:${messages.length}`, state };
+    if (state === "running") marker.startedAt = Date.now();
+    messages.push(marker);
+    return marker;
+  }
+
   function loadHistory(entries: ReturnType<import("@earendil-works/pi-coding-agent").SessionManager["getBranch"]>) {
     messages = [];
     for (const entry of entries) {
@@ -92,6 +102,7 @@ export default function (pi: ExtensionAPI) {
       }
       if (entry.type !== "message") continue;
       const message = entry.message;
+      if (message.role === "assistant" && message.content.some(part => part.type === "thinking")) addThinking("done");
       const item = display(message);
       if (item) messages.push(item);
       if (message.role === "assistant") {
@@ -105,6 +116,7 @@ export default function (pi: ExtensionAPI) {
       }
     }
     streaming = undefined;
+    thinking = undefined;
     waiting = undefined;
   }
 
@@ -593,11 +605,28 @@ export default function (pi: ExtensionAPI) {
     const item = tool(event.toolCallId);
     if (item) Object.assign(item, { output: event.result, endedAt: Date.now(), state: event.isError ? "error" : "done" });
   });
-  pi.on("message_update", async (event) => { streaming = display(event.message); });
+  function finishThinking() {
+    if (thinking?.state === "running") {
+      thinking.state = "done";
+      thinking.endedAt = Date.now();
+    }
+  }
+  pi.on("message_update", async (event) => {
+    const type = event.assistantMessageEvent?.type;
+    if (type === "thinking_start" || type === "thinking_delta") {
+      if (thinking?.state !== "running") thinking = addThinking("running");
+    } else if (type === "thinking_end") finishThinking();
+    streaming = display(event.message);
+  });
   pi.on("message_end", async (event) => {
+    if (event.message.role === "assistant") {
+      finishThinking();
+      if (!thinking && event.message.content.some(part => part.type === "thinking")) addThinking("done");
+      thinking = undefined;
+      streaming = undefined;
+    }
     const item = display(event.message);
     if (item) messages.push(item);
-    if (event.message.role === "assistant") streaming = undefined;
   });
   pi.on("session_shutdown", async () => {
     sessionActive = false;
