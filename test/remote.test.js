@@ -29,8 +29,9 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
     sessionManager: { getSessionName: () => 'Example session', getBranch: () => [
       { type: 'custom', customType: 'pi-pocket-prompt', data: { via: 'tailscale' } },
       { type: 'message', message: { role: 'user', content: '**literal**' } },
-      { type: 'message', message: { role: 'assistant', content: [ { type: 'text', text: '# Heading\n\n**bold**\n\n| A | B |\n| - | - |\n| 1 | 2 |\n\n```js\nhello()\n```\n\n<img src=x onerror="alert(1)"><script>alert(1)</script> [bad](javascript:alert(1))' }, { type: 'toolCall', id: 'old', name: 'read', arguments: { path: 'x' } } ] } },
-      { type: 'message', message: { role: 'toolResult', toolCallId: 'old', toolName: 'read', content: [{ type: 'text', text: 'file contents' }], isError: false } },
+      { type: 'message', message: { role: 'assistant', timestamp: 1000, content: [ { type: 'text', text: '# Heading\n\n**bold**\n\n| A | B |\n| - | - |\n| 1 | 2 |\n\n```js\nhello()\n```\n\n<img src=x onerror="alert(1)"><script>alert(1)</script> [bad](javascript:alert(1))' }, { type: 'toolCall', id: 'old', name: 'read', arguments: { path: 'x' } } ] } },
+      { type: 'message', message: { role: 'toolResult', timestamp: 4000, toolCallId: 'old', toolName: 'read', content: [{ type: 'text', text: 'file contents' }], isError: false } },
+      { type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: 'Continuing.' }] } },
     ] },
     isIdle: () => !busy,
     abort: () => { aborts++; },
@@ -83,7 +84,7 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
     assert.equal(sessions.open, true);
     for (let i = 0; i < 50 && sessions.querySelector('.session-list').hidden; i++) await new Promise(resolve => setTimeout(resolve, 20));
     assert.equal(sessions.querySelector('.session-list').hidden, false);
-    assert.equal(sessions.querySelector('[aria-current="true"] strong').textContent, 'Example session');
+    assert.equal(sessions.querySelector('[aria-current="page"] strong').textContent, 'Example session');
     assert.equal(sessions.querySelector('.badge').textContent, 'Idle');
     const search = sessions.querySelector('#session-search');
     search.value = 'no such session';
@@ -96,6 +97,17 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
     assert.equal(sessions.querySelector('#stop-all, #disconnect-tailscale'), null);
     sessions.querySelector('#close-sessions').click();
     assert.equal(sessions.open, false);
+    const tabs = document.querySelector('.session-tabs');
+    const showTabs = document.querySelector('#show-session-tabs');
+    assert.equal(tabs.hidden, true);
+    showTabs.checked = true;
+    showTabs.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(tabs.hidden, false);
+    const currentTab = tabs.querySelector('[aria-current="page"]');
+    assert.equal(currentTab.textContent, 'Example session');
+    assert.equal(currentTab.dataset.state, 'idle');
+    assert.equal(dom.window.localStorage.getItem('pockpi-session-tabs'), 'true');
+    assert.equal(currentTab.dispatchEvent(new dom.window.MouseEvent('click', { cancelable: true })), false);
     const actions = document.querySelector('.actions');
     actions.querySelector('summary[aria-label="More actions"]').click();
     assert.equal(actions.open, true);
@@ -138,6 +150,16 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
     const activity = document.querySelector('.activity');
     assert.equal(activity.open, true);
     assert.match(activity.querySelector('summary').textContent, /Read 1 file/);
+    assert.equal(activity.querySelector('.activity-time').textContent, '3s');
+    const conversation = document.querySelector('#conversation');
+    const jump = document.querySelector('#jump-latest');
+    Object.defineProperty(conversation, 'scrollHeight', { value: 1000 });
+    conversation.scrollTop = 0;
+    conversation.dispatchEvent(new dom.window.Event('scroll'));
+    assert.equal(jump.hidden, false);
+    jump.click();
+    assert.equal(conversation.scrollTop, 1000);
+    assert.equal(jump.hidden, true);
     activity.querySelector('summary').click();
     assert.equal(activity.open, false);
     activity.querySelector('summary').click();
@@ -152,6 +174,9 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
     await events.tool_execution_end({ toolCallId: 'new', result: { content: [{ type: 'text', text: 'failed' }] }, isError: true });
     await events.tool_execution_start({ toolCallId: 'edit', toolName: 'edit', args: { path: 'file.js' } });
     await events.tool_execution_end({ toolCallId: 'edit', result: { content: [{ type: 'text', text: 'edited' }], details: { diff: '-old\n+new' } }, isError: false });
+    const fold = document.querySelector('#fold-activity');
+    fold.checked = true;
+    fold.dispatchEvent(new dom.window.Event('change'));
     busy = true;
     await events.ui_prompt_start({ kind: 'confirm', title: 'Approve?' });
     await events.message_update({ message: { role: 'assistant', content: [{ type: 'text', text: '## Streaming' }] } });
@@ -159,8 +184,10 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
     assert.equal(document.querySelectorAll('.markdown h2')[0].textContent, 'Streaming');
     assert.equal(document.querySelector('.markdown h1'), priorReply);
     assert.equal(document.querySelector('.tool').open, true);
-    assert.equal(document.querySelector('.activity').open, true);
-    assert.match(document.querySelector('.activity > summary').textContent, /Ran 1 command.*Edited 1 file|Read 1 file/);
+    const groups = document.querySelectorAll('.activity');
+    assert.equal(groups[0].open, true);
+    assert.equal(groups[1].open, false);
+    assert.match(groups[1].querySelector('summary').textContent, /Ran 1 command.*Edited 1 file/);
     assert.match(document.querySelectorAll('.tool summary')[1].textContent, /\$ pwd.*error/);
     assert.match(document.querySelectorAll('.tool summary')[1].textContent, /failed/);
     assert.equal(document.querySelector('.markdown pre code .hljs-title')?.textContent, 'hello');
@@ -171,6 +198,10 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
     document.querySelector('#open-sessions').click();
     for (let i = 0; i < 50 && sessions.querySelector('.badge')?.textContent !== 'Waiting'; i++) await new Promise(resolve => setTimeout(resolve, 20));
     assert.equal(sessions.querySelector('.badge').textContent, 'Waiting');
+    assert.equal(tabs.querySelector('[aria-current="page"]').dataset.state, 'waiting');
+    showTabs.checked = false;
+    showTabs.dispatchEvent(new dom.window.Event('change'));
+    assert.equal(tabs.hidden, true);
     sessions.querySelector('#close-sessions').click();
     const send = document.querySelector('#composer-submit');
     assert.equal(send.getAttribute('aria-label'), 'Stop execution');

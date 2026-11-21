@@ -9,6 +9,7 @@
 </head>
 <body>
   <div class="app">
+    <nav class="session-tabs" aria-label="Shared sessions" hidden></nav>
     <header>
       <div class="brand"><button type="button" class="logo" id="open-sessions" aria-label="Open sessions" aria-haspopup="dialog" aria-controls="session-drawer"><svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" fill="currentColor"><path d="M0 0 H300 V200 H200 V100 H0 Z"/><path d="M0 100 H100 V200 H200 V300 H100 V400 H0 Z"/><rect x="300" y="200" width="100" height="200"/></svg></button><div><h1 id="active-session-name">PockPi</h1><p class="subtitle" id="active-project"></p></div></div>
       <div class="header-actions">
@@ -18,7 +19,7 @@
           <option value="graphite">Graphite</option>
           <option value="light">Light</option>
           <option value="forest">Forest</option>
-        </select><p id="browser-label">This browser: checking…</p><button type="button" id="disconnect-tailscale">Turn off Tailscale access</button><button type="button" class="danger" id="stop-all"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>Stop all &amp; disconnect</button></div>
+        </select><label class="activity-setting"><input id="fold-activity" type="checkbox"> Keep activity folded</label><label class="activity-setting"><input id="show-session-tabs" type="checkbox"> Show session tabs</label><p id="browser-label">This browser: checking…</p><button type="button" id="disconnect-tailscale">Turn off Tailscale access</button><button type="button" class="danger" id="stop-all"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>Stop all &amp; disconnect</button></div>
         </details>
       </div>
     </header>
@@ -27,6 +28,7 @@
       <div class="example" id="notice" role="status">Connecting to Pi…</div>
     </main>
     <footer>
+      <button type="button" id="jump-latest" hidden>Jump to latest</button>
       <div class="composer"><form id="composer"></form><textarea form="composer" id="prompt" rows="2" aria-label="Message Pi" placeholder="Message Pi…"></textarea><div class="composer-row"><details class="header-menu model-picker" name="header-menu">
           <summary>Model</summary>
           <form class="sessions-panel" id="model-form">

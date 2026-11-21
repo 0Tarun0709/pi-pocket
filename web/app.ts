@@ -21,6 +21,33 @@ const form = document.querySelector<HTMLFormElement>('#composer')!;
 const prompt = document.querySelector<HTMLTextAreaElement>('#prompt')!;
 const conversation = document.querySelector<HTMLElement>('#conversation')!;
 const messages = document.querySelector<HTMLElement>('#messages')!;
+const jumpLatest = document.querySelector<HTMLButtonElement>('#jump-latest')!;
+const foldActivity = document.querySelector<HTMLInputElement>('#fold-activity')!;
+foldActivity.checked = localStorage.getItem('pockpi-fold-activity') === 'true';
+foldActivity.addEventListener('change', () => {
+  localStorage.setItem('pockpi-fold-activity', String(foldActivity.checked));
+  void refresh();
+});
+function updateJump() {
+  jumpLatest.hidden = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 100;
+}
+conversation.addEventListener('scroll', updateJump, { passive: true });
+window.addEventListener('resize', updateJump);
+jumpLatest.addEventListener('click', () => {
+  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  if (typeof conversation.scrollTo === 'function') {
+    conversation.scrollTo({ top: conversation.scrollHeight, behavior: reduceMotion ? 'instant' : 'smooth' });
+  } else {
+    conversation.scrollTop = conversation.scrollHeight;
+    updateJump();
+  }
+});
+function updateActivityTimes() {
+  for (const time of messages.querySelectorAll<HTMLElement>('.activity-time')) {
+    const seconds = Math.max(0, Math.floor((Number(time.dataset.end ?? Date.now()) - Number(time.dataset.start)) / 1000));
+    time.textContent = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  }
+}
 const status = document.querySelector<HTMLElement>('#status')!;
 const notice = document.querySelector<HTMLElement>('#notice')!;
 const button = document.querySelector<HTMLButtonElement>('#composer-submit')!;
@@ -32,6 +59,14 @@ drawer.addEventListener('click', event => {
   if (event.target === drawer && (event.clientX < left || event.clientX >= right)) drawer.close();
 });
 const sessionList = document.querySelector<HTMLUListElement>('.session-list')!;
+const sessionTabs = document.querySelector<HTMLElement>('.session-tabs')!;
+const showSessionTabs = document.querySelector<HTMLInputElement>('#show-session-tabs')!;
+showSessionTabs.checked = localStorage.getItem('pockpi-session-tabs') === 'true';
+showSessionTabs.addEventListener('change', () => {
+  localStorage.setItem('pockpi-session-tabs', String(showSessionTabs.checked));
+  sessionTabs.hidden = !showSessionTabs.checked || !sessionTabs.childElementCount;
+  if (showSessionTabs.checked) void refreshSessions();
+});
 const sessionEmpty = document.querySelector<HTMLElement>('#session-empty')!;
 const sessionSearch = document.querySelector<HTMLInputElement>('#session-search')!;
 function filterSessions() {
@@ -49,8 +84,10 @@ sessionSearch.addEventListener('input', () => { if (lastSessions !== undefined) 
 const selectedSession = new URLSearchParams(location.search).get('session');
 const api = (action: string) => selectedSession ? `/api/sessions/${encodeURIComponent(selectedSession)}/${action}` : `/api/${action}`;
 let lastSessions: string | undefined;
+let loadingSessions = false;
 async function refreshSessions() {
-  if (stoppedAll) return;
+  if (stoppedAll || loadingSessions) return;
+  loadingSessions = true;
   try {
     const response = await fetch('/api/sessions', { cache: 'no-store' });
     if (!response.ok) throw new Error();
@@ -59,16 +96,30 @@ async function refreshSessions() {
     const serialized = JSON.stringify(sessions);
     if (serialized === lastSessions) return;
     lastSessions = serialized;
+    const tabs: HTMLAnchorElement[] = [];
     sessionList.replaceChildren(...sessions.map(session => {
       const row = document.createElement('li');
       row.dataset.search = `${session.name} ${session.project}`.toLowerCase();
       const link = document.createElement('a');
-      link.href = `/?session=${session.id}`;
-      if (selectedSession === session.id || (!selectedSession && session.gateway)) link.setAttribute('aria-current', 'true');
-      link.addEventListener('click', event => {
-        if (link.hasAttribute('aria-current')) { event.preventDefault(); drawer.close(); }
+      link.href = `/?session=${encodeURIComponent(session.id)}`;
+      const current = selectedSession === session.id || (!selectedSession && session.gateway);
+      if (current) link.setAttribute('aria-current', 'page');
+      const switchSession = (event: MouseEvent) => {
+        if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+        if (current) { event.preventDefault(); if (drawer.open) drawer.close(); }
         else if (prompt.value.trim() && !confirm('Switch sessions and discard this unsent draft?')) event.preventDefault();
-      });
+      };
+      link.addEventListener('click', switchSession);
+      const tab = document.createElement('a');
+      tab.href = link.href;
+      tab.textContent = session.name;
+      tab.dataset.state = session.waiting ? 'waiting' : session.busy ? 'working' : 'idle';
+      const label = `${session.name} · ${tab.dataset.state}`;
+      tab.title = label;
+      tab.setAttribute('aria-label', label);
+      if (current) tab.setAttribute('aria-current', 'page');
+      tab.addEventListener('click', switchSession);
+      tabs.push(tab);
       const title = document.createElement('span');
       const name = document.createElement('strong');
       name.textContent = session.name;
@@ -86,13 +137,26 @@ async function refreshSessions() {
       row.append(link);
       return row;
     }));
+    const changedTabs = tabs.length !== sessionTabs.childElementCount ||
+      tabs.some((tab, index) => !tab.isEqualNode(sessionTabs.children[index] ?? null));
+    const firstTabs = !sessionTabs.childElementCount;
+    if (changedTabs) {
+      const focused = document.activeElement;
+      const focusedHref = focused instanceof HTMLAnchorElement && sessionTabs.contains(focused) ? focused.href : undefined;
+      sessionTabs.replaceChildren(...tabs);
+      if (focusedHref) tabs.find(tab => tab.href === focusedHref)?.focus({ preventScroll: true });
+    }
+    sessionTabs.hidden = !showSessionTabs.checked || !tabs.length;
+    if (firstTabs && !sessionTabs.hidden) sessionTabs.querySelector('[aria-current]')?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' });
     filterSessions();
   } catch {
     lastSessions = undefined;
+    sessionTabs.hidden = true;
+    sessionTabs.replaceChildren();
     sessionList.hidden = true;
     sessionEmpty.hidden = false;
     sessionEmpty.textContent = 'Could not load sessions.';
-  }
+  } finally { loadingSessions = false; }
 }
 function clearSession() {
   canSwitchModel = false;
@@ -102,6 +166,7 @@ function clearSession() {
     sessionList.hidden = true;
     sessionEmpty.hidden = false;
     sessionEmpty.textContent = 'PockPi is disconnected.';
+    sessionTabs.hidden = true;
   }
 }
 let lastMessages = '';
@@ -238,21 +303,24 @@ async function refresh() {
     updateSendButton();
     status.textContent = session.waiting ? 'Waiting for input' : session.busy ? 'Working' : 'Connected';
     status.dataset.working = String(session.busy && !session.waiting);
-    if (drawer.open) void refreshSessions();
+    if (drawer.open || showSessionTabs.checked) void refreshSessions();
     if (session.local) document.querySelector<HTMLElement>('#browser-label')!.textContent = 'This browser: local access';
     else if (session.browser) document.querySelector<HTMLElement>('#browser-label')!.textContent = `This browser: ${session.browser.label} · ${session.browser.id}`;
     document.querySelector<HTMLElement>('.footnote')!.textContent = session.queued ? `${session.queued} web prompt${session.queued === 1 ? '' : 's'} queued.` : 'Use the stop button to interrupt Pi while it is working.';
     notice.hidden = !session.waiting && !actionNotice;
     if (session.waiting) notice.textContent = `Pi is waiting for ${session.waiting.title || session.waiting.kind}. Answer it in the laptop terminal; remote answers are not supported yet.`;
     else if (actionNotice) notice.textContent = actionNotice;
-    const serialized = JSON.stringify(session.messages);
-    if (serialized === lastMessages) return;
-    renderTranscript(messages, conversation, session.messages);
-    lastMessages = serialized;
+    const serialized = JSON.stringify([foldActivity.checked, session.messages]);
+    if (serialized !== lastMessages) {
+      renderTranscript(messages, conversation, session.messages);
+      lastMessages = serialized;
+      updateJump();
+    }
+    updateActivityTimes();
   } catch {
     if (stoppedAll) return;
     clearSession();
-    if (drawer.open) void refreshSessions();
+    if (drawer.open || showSessionTabs.checked) void refreshSessions();
     status.textContent = 'Disconnected';
     status.dataset.working = 'false';
     notice.hidden = false;

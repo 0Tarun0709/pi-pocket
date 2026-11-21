@@ -97,7 +97,9 @@ globalThis.renderTranscript = (() => {
       groups.set(key, state);
     }
     const choice = state;
-    group.open = choice.touched ? choice.open : newest;
+    const live = items.some(item => item.state === 'running');
+    const folded = localStorage.getItem('pockpi-fold-activity') === 'true';
+    group.open = choice.touched ? choice.open : !folded && (live || newest);
     const summary = document.createElement('summary');
     const counts = new Map<string, number>();
     for (const item of items) counts.set(item.name, (counts.get(item.name) ?? 0) + 1);
@@ -116,7 +118,20 @@ globalThis.renderTranscript = (() => {
     const failed = items.filter(item => item.state === 'error').length;
     indicator.textContent = failed ? `${failed} failed` : items.some(item => item.state === 'running') ? 'Running' : '';
     if (failed) indicator.className = 'activity-failed';
-    summary.append(indicator);
+    const meta = document.createElement('span');
+    meta.className = 'activity-meta';
+    const starts = items.flatMap(item => item.startedAt ?? []);
+    const ends = items.flatMap(item => item.endedAt ?? []);
+    if (starts.length && (live || ends.length)) {
+      const time = document.createElement('span');
+      time.className = 'activity-time';
+      const start = Math.min(...starts);
+      time.dataset.start = String(start);
+      if (!live) time.dataset.end = String(Math.max(...ends));
+      meta.append(time);
+    }
+    meta.append(indicator);
+    summary.append(meta);
     summary.addEventListener('click', event => {
       event.preventDefault();
       choice.touched = true;
@@ -177,7 +192,7 @@ globalThis.renderTranscript = (() => {
     function flush() {
       if (!tools.length) return;
       const items = tools;
-      add(`tools:${items[0].id}`, [items, newest], () => activity(items, newest));
+      add(`tools:${items[0].id}`, [items, newest, localStorage.getItem('pockpi-fold-activity')], () => activity(items, newest));
       tools = [];
     }
     messages.forEach((item, index) => {

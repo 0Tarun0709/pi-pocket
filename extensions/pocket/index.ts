@@ -24,7 +24,7 @@ const disabledFile = join(stateDir, "remote-disabled");
 const originFile = join(stateDir, "tailscale-origin");
 const directory = sessionDirectory(stateDir);
 
-export type ToolMessage = { role: "tool"; id: string; name: string; args: unknown; output?: unknown; state: "running" | "done" | "error" | "unknown" };
+export type ToolMessage = { role: "tool"; id: string; name: string; args: unknown; output?: unknown; startedAt?: number; endedAt?: number; state: "running" | "done" | "error" | "unknown" };
 export type TextMessage = { role: "user" | "assistant"; text: string };
 export type DisplayMessage = TextMessage | { role: "source"; via: "tailscale" | "local" } | ToolMessage;
 
@@ -96,11 +96,11 @@ export default function (pi: ExtensionAPI) {
       if (item) messages.push(item);
       if (message.role === "assistant") {
         for (const part of message.content) {
-          if (part.type === "toolCall") messages.push({ role: "tool", id: part.id, name: part.name, args: part.arguments, state: "unknown" });
+          if (part.type === "toolCall") messages.push({ role: "tool", id: part.id, name: part.name, args: part.arguments, startedAt: message.timestamp, state: "unknown" });
         }
       } else if (message.role === "toolResult") {
         const existing = tool(message.toolCallId);
-        if (existing) Object.assign(existing, { output: { content: message.content, details: message.details }, state: message.isError ? "error" : "done" });
+        if (existing) Object.assign(existing, { output: { content: message.content, details: message.details }, endedAt: message.timestamp, state: message.isError ? "error" : "done" });
         else messages.push({ role: "tool", id: message.toolCallId, name: message.toolName, args: undefined, output: { content: message.content, details: message.details }, state: message.isError ? "error" : "done" });
       }
     }
@@ -583,7 +583,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("ui_prompt_start", async (event) => { waiting = { kind: event.kind, title: event.title }; });
   pi.on("ui_prompt_end", async () => { waiting = undefined; });
   pi.on("tool_execution_start", async (event) => {
-    messages.push({ role: "tool", id: event.toolCallId, name: event.toolName, args: event.args, state: "running" });
+    messages.push({ role: "tool", id: event.toolCallId, name: event.toolName, args: event.args, startedAt: Date.now(), state: "running" });
   });
   pi.on("tool_execution_update", async (event) => {
     const item = tool(event.toolCallId);
@@ -591,7 +591,7 @@ export default function (pi: ExtensionAPI) {
   });
   pi.on("tool_execution_end", async (event) => {
     const item = tool(event.toolCallId);
-    if (item) Object.assign(item, { output: event.result, state: event.isError ? "error" : "done" });
+    if (item) Object.assign(item, { output: event.result, endedAt: Date.now(), state: event.isError ? "error" : "done" });
   });
   pi.on("message_update", async (event) => { streaming = display(event.message); });
   pi.on("message_end", async (event) => {
