@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, copyFile, symlink, rm, writeFile, readFile } from 'node
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { Server } from 'node:http';
+import { Server, request } from 'node:http';
 
 test('all-stop aborts, discards remote queue and stays disabled until enabled locally', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pi-remote-test-'));
@@ -16,8 +16,8 @@ test('all-stop aborts, discards remote queue and stays disabled until enabled lo
   await symlink(resolve('node_modules'), join(dir, 'node_modules'));
   const { default: extension } = await import(pathToFileURL(join(dir, 'extensions/pocket/index.ts')));
   const events = {}, commands = {};
-  let url, aborts = 0, sent = [], idle = false;
-  const ctx = { cwd: dir, sessionManager: { getBranch: () => [] }, isIdle: () => idle, abort: () => aborts++, ui: { notify: message => { if (message.startsWith('Pi Remote: http')) url = message.slice('Pi Remote: '.length); } } };
+  let url, key, aborts = 0, sent = [], idle = false;
+  const ctx = { cwd: dir, sessionManager: { getBranch: () => [] }, isIdle: () => idle, abort: () => aborts++, ui: { notify: message => { if (message.startsWith('Pi Remote: http')) url = message.slice('Pi Remote: '.length); if (message.includes('Access key: ')) key = message.match(/Access key: (\S+)/)[1]; } } };
   extension({ on: (name, fn) => events[name] = fn, registerCommand: (name, command) => commands[name] = command, sendUserMessage: text => sent.push(text) });
   const original = Server.prototype.listen;
   Server.prototype.listen = function (_port, host, callback) { return original.call(this, 0, host, callback); };
@@ -28,9 +28,26 @@ test('all-stop aborts, discards remote queue and stays disabled until enabled lo
     assert.equal(url, undefined);
     assert.match(await readFile(join(dir, 'state/pi-pocket/remote-disabled'), 'utf8'), /disabled/);
     await commands.remote.handler('enable', ctx);
-    const post = (path, body = {}) => fetch(url + path, { method: 'POST', headers: { origin: url, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    await commands.remote.handler('', ctx);
+    const headers = () => ({ authorization: 'Basic ' + Buffer.from(`pocket:${key}`).toString('base64') });
+    const get = path => fetch(url + path, { headers: headers() });
+    const post = (path, body = {}) => fetch(url + path, { method: 'POST', headers: { ...headers(), origin: url, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    assert.equal((await fetch(url + '/api/session')).status, 401);
+    assert.equal((await fetch(url, { headers: { authorization: 'Basic ' + Buffer.from('pocket:wrong').toString('base64') } })).status, 401);
+    await commands.remote.handler('share laptop.test.ts.net', ctx);
+    const raw = (path, headers, method = 'GET') => new Promise((resolve, reject) => {
+      const req = request(url + path, { headers, method }, res => { res.resume(); resolve(res.statusCode); });
+      req.on('error', reject); req.end();
+    });
+    const remoteHeaders = { ...headers(), host: 'laptop.test.ts.net' };
+    assert.equal(await raw('/api/session', { host: remoteHeaders.host }), 401);
+    assert.equal(await raw('/api/session', remoteHeaders), 200);
+    assert.equal(await raw('/api/session', { ...headers(), host: 'evil.test.ts.net' }), 403);
+    assert.equal(await raw('/api/stop', { ...remoteHeaders, origin: 'https://evil.test.ts.net', 'content-type': 'application/json' }, 'POST'), 403);
+    assert.equal(await raw('/api/stop', { ...remoteHeaders, 'content-type': 'application/json' }, 'POST'), 403);
+    assert.equal(await raw('/api/prompt', { ...remoteHeaders, origin: 'https://laptop.test.ts.net', 'content-type': 'application/json' }, 'POST'), 400);
     assert.equal((await post('/api/prompt', { text: 'queued' })).status, 202);
-    assert.equal((await (await fetch(url + '/api/session')).json()).queued, 1);
+    assert.equal((await (await get('/api/session')).json()).queued, 1);
     assert.equal((await post('/api/stop')).status, 200);
     assert.equal(aborts, 1);
     assert.equal((await post('/api/stop-all')).status, 200);
@@ -42,9 +59,14 @@ test('all-stop aborts, discards remote queue and stays disabled until enabled lo
     await events.session_shutdown();
     await events.session_start({}, ctx);
     await assert.rejects(fetch(url));
+    const oldKey = key;
     await commands.remote.handler('enable', ctx);
-    assert.equal((await fetch(url)).status, 200);
-    assert.equal((await (await fetch(url + '/api/session')).json()).queued, 0);
+    await commands.remote.handler('', ctx);
+    assert.notEqual(key, oldKey);
+    assert.equal(await raw('/api/session', { ...remoteHeaders, authorization: 'Basic ' + Buffer.from(`pocket:${oldKey}`).toString('base64') }), 401);
+    assert.equal(await raw('/api/session', { ...headers(), host: 'laptop.test.ts.net' }), 200);
+    assert.equal((await get('')).status, 200);
+    assert.equal((await (await get('/api/session')).json()).queued, 0);
   } finally {
     await events.session_shutdown();
     Server.prototype.listen = original;

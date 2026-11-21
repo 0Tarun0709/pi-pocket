@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { JSDOM } from 'jsdom';
+import { JSDOM, requestInterceptor } from 'jsdom';
 import { Server } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -10,13 +10,13 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
   const state = await mkdtemp(join(tmpdir(), 'pi-pocket-state-'));
   process.env.PI_CODING_AGENT_DIR = state;
   const { default: extension } = await import('../extensions/pocket/index.ts');
-  const events = {};
-  let url, busy = false, aborts = 0;
-  extension({ registerCommand() {}, on(name, handler) { events[name] = handler; }, sendUserMessage() {} });
+  const events = {}, commands = {};
+  let url, key, busy = false, aborts = 0;
+  extension({ registerCommand(name, command) { commands[name] = command; }, on(name, handler) { events[name] = handler; }, sendUserMessage() {} });
   // Tests use an ephemeral port so an active Pi Remote session can keep its fixed port.
   const listen = Server.prototype.listen;
   Server.prototype.listen = function (_port, host, callback) { return listen.call(this, 0, host, callback); };
-  try { await events.session_start({}, {
+  const ctx = {
     cwd: state,
     sessionManager: { getBranch: () => [
       { type: 'message', message: { role: 'user', content: '**literal**' } },
@@ -25,13 +25,19 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
     ] },
     isIdle: () => !busy,
     abort: () => { aborts++; },
-    ui: { notify(message) { url = message.replace('Pi Remote: ', ''); } },
-  }); } finally { Server.prototype.listen = listen; }
+    ui: { notify(message) {
+      if (message.startsWith('Pi Remote: http')) url = message.replace('Pi Remote: ', '');
+      if (message.includes('Access key: ')) key = message.match(/Access key: (\S+)/)[1];
+    } },
+  };
+  try { await events.session_start({}, ctx); } finally { Server.prototype.listen = listen; }
+  await commands.remote.handler('', ctx);
+  const authorization = 'Basic ' + Buffer.from(`pocket:${key}`).toString('base64');
   let dom;
   try {
     dom = await JSDOM.fromURL(url, {
-      resources: 'usable', runScripts: 'dangerously',
-      beforeParse(window) { window.fetch = (path, options) => fetch(new URL(path, url), { ...options, headers: { ...options?.headers, origin: url } }); },
+      resources: { interceptors: [requestInterceptor(request => fetch(request.url, { headers: { authorization } }))] }, runScripts: 'dangerously',
+      beforeParse(window) { window.fetch = (path, options) => fetch(new URL(path, url), { ...options, headers: { ...options?.headers, origin: url, authorization } }); },
     });
     for (let i = 0; i < 100 && !dom.window.document.querySelector('.markdown h1'); i++) {
       await new Promise(resolve => setTimeout(resolve, 20));

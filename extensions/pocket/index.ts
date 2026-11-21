@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFile, writeFile, unlink, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -11,6 +12,7 @@ const require = createRequire(import.meta.url);
 const port = 18789;
 const stateDir = join(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), "pi-pocket");
 const disabledFile = join(stateDir, "remote-disabled");
+const originFile = join(stateDir, "tailscale-origin");
 
 type ToolMessage = { role: "tool"; id: string; name: string; args: unknown; output?: unknown; state: "running" | "done" | "error" | "unknown" };
 type DisplayMessage = { role: "user" | "assistant"; text: string } | ToolMessage;
@@ -30,6 +32,8 @@ export default function (pi: ExtensionAPI) {
   let disabled = false;
   let queued: string[] = [];
   let queueTimer: ReturnType<typeof setInterval> | undefined;
+  let accessKey = randomBytes(24).toString("base64url");
+  let remoteOrigin: string | undefined;
 
   function stopServer() {
     if (queueTimer) clearInterval(queueTimer);
@@ -65,9 +69,32 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.registerCommand("remote", {
-    description: "Show Pi Remote address, or use /remote enable after an all-stop",
+    description: "Show address and access key; use /remote share <hostname> for Tailscale",
     handler: async (args, ctx) => {
-      if (args.trim() === "enable") {
+      const input = args.trim();
+      if (input === "unshare") {
+        try {
+          await unlink(originFile).catch((error) => { if (error.code !== "ENOENT") throw error; });
+          remoteOrigin = undefined;
+          ctx.ui.notify("Pi Pocket no longer accepts the Tailscale hostname. Disable Tailscale Serve separately.", "info");
+        } catch (error) { ctx.ui.notify(`Pi Pocket could not remove its origin: ${error}`, "error"); }
+        return;
+      }
+      if (input.startsWith("share ")) {
+        const hostname = input.slice(6).toLowerCase();
+        if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.ts\.net$/.test(hostname) || hostname.length > 253) {
+          ctx.ui.notify("Provide the exact Tailscale hostname, without https:// or a port.", "error");
+          return;
+        }
+        try {
+          await mkdir(stateDir, { recursive: true, mode: 0o700 });
+          await writeFile(originFile, `https://${hostname}`, { mode: 0o600 });
+          remoteOrigin = `https://${hostname}`;
+          ctx.ui.notify(`Pi Pocket accepts ${remoteOrigin}. Run /remote for the access key.`, "info");
+        } catch (error) { ctx.ui.notify(`Pi Pocket could not save its origin: ${error}`, "error"); }
+        return;
+      }
+      if (input === "enable") {
         if (server) { ctx.ui.notify("Pi Remote is already running", "info"); return; }
         try {
           await startServer(ctx);
@@ -81,7 +108,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       const address = server?.address();
-      ctx.ui.notify(address && typeof address !== "string" ? `Pi Remote: http://127.0.0.1:${address.port}` : "Pi Remote is not running", "info");
+      ctx.ui.notify(address && typeof address !== "string" ? `Pi Pocket: http://127.0.0.1:${address.port}\nUsername: pocket\nAccess key: ${accessKey}${remoteOrigin ? `\nTailscale: ${remoteOrigin}` : ""}` : "Pi Remote is not running", "info");
     },
   });
 
@@ -92,17 +119,26 @@ export default function (pi: ExtensionAPI) {
       readFile(join(dirname(require.resolve("dompurify")), "purify.min.js")),
       readFile(require.resolve("@highlightjs/cdn-assets/highlight.min.js")),
     ]);
+    accessKey = randomBytes(24).toString("base64url");
     server = createServer(async (req, res) => {
       const host = req.headers.host;
       const address = server?.address();
       const expectedHost = typeof address === "object" && address ? `127.0.0.1:${address.port}` : "";
-      // Restrict requests to the local origin, including against DNS rebinding.
-      if (host !== expectedHost || (req.headers.origin && req.headers.origin !== `http://${expectedHost}`)) {
+      const localOrigin = `http://${expectedHost}`;
+      const requestOrigin = host === expectedHost ? localOrigin : remoteOrigin && host === new URL(remoteOrigin).host ? remoteOrigin : undefined;
+      if (!requestOrigin || (req.headers.origin && req.headers.origin !== requestOrigin)) {
         res.writeHead(403).end();
         return;
       }
       if (disabled) { res.writeHead(503).end("Pi Remote disabled"); return; }
       res.setHeader("Cache-Control", "no-store");
+      const expectedAuth = Buffer.from(`pocket:${accessKey}`);
+      const auth = req.headers.authorization?.match(/^Basic ([A-Za-z0-9+/]+={0,2})$/i);
+      const suppliedAuth = auth ? Buffer.from(auth[1], "base64") : Buffer.alloc(0);
+      if (suppliedAuth.length !== expectedAuth.length || !timingSafeEqual(suppliedAuth, expectedAuth)) {
+        res.writeHead(401, { "WWW-Authenticate": 'Basic realm="Pi Pocket", charset="UTF-8"' }).end("Authentication required");
+        return;
+      }
       if (req.method === "GET" && req.url === "/") {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(html);
       } else if (req.method === "GET" && (req.url === "/marked.js" || req.url === "/purify.js" || req.url === "/highlight.js")) {
@@ -115,7 +151,7 @@ export default function (pi: ExtensionAPI) {
           queued: queued.length,
         }));
       } else if (req.method === "POST" && req.url === "/api/prompt") {
-        if (req.headers.origin !== `http://${expectedHost}` || req.headers["content-type"] !== "application/json") {
+        if (req.headers.origin !== requestOrigin || req.headers["content-type"] !== "application/json") {
           res.writeHead(403).end();
           return;
         }
@@ -134,7 +170,7 @@ export default function (pi: ExtensionAPI) {
           res.writeHead(400).end("Invalid prompt");
         }
       } else if (req.method === "POST" && (req.url === "/api/stop" || req.url === "/api/stop-all")) {
-        if (req.headers.origin !== `http://${expectedHost}` || req.headers["content-type"] !== "application/json") {
+        if (req.headers.origin !== requestOrigin || req.headers["content-type"] !== "application/json") {
           res.writeHead(403).end();
           return;
         }
@@ -181,6 +217,14 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     loadHistory(ctx.sessionManager.getBranch());
+    try {
+      const configured = await readFile(originFile, "utf8");
+      if (!/^https:\/\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.ts\.net$/.test(configured)) throw new Error("Invalid Tailscale origin");
+      remoteOrigin = configured;
+    } catch (error: any) {
+      if (error.code !== "ENOENT") throw error;
+      remoteOrigin = undefined;
+    }
     try {
       // Preserve an all-stop made by the older project-local extension.
       try {
