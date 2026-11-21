@@ -1,5 +1,9 @@
 # Pi Pocket
 
+[![Project version](https://img.shields.io/github/package-json/v/0Tarun0709/pi-pocket?label=version)](package.json)
+[![Node.js 24 or newer](https://img.shields.io/badge/node-%3E%3D24-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 Access your running [Pi](https://github.com/earendil-works/pi) session from a browser, locally or privately through Tailscale. View responses and tool activity, send prompts, and stop a running agent.
 
 ## Install
@@ -50,3 +54,7 @@ Clone the repository, run `npm ci`, and start Pi in the project directory. Grant
 npm test
 npm run typecheck
 ```
+
+## License
+
+[MIT](LICENSE)

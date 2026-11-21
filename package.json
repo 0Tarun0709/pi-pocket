@@ -2,6 +2,7 @@
   "name": "pi-pocket",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "A local web interface for a running Pi session",
   "keywords": [
     "pi-package",
