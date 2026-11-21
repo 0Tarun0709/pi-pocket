@@ -7,6 +7,8 @@
 
 Access your running [Pi](https://github.com/earendil-works/pi) session from a browser, locally or privately through Tailscale. View responses and tool activity, send prompts, and stop a running agent.
 
+See the [changelog](CHANGELOG.md) for release history.
+
 ## Install
 
 Requires Pi and Node.js 24 or newer.

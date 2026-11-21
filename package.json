@@ -19,7 +19,8 @@
   "files": [
     "extensions/",
     "web/",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "pi": {
     "extensions": [
