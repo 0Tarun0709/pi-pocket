@@ -60,18 +60,6 @@ npm test
 npm run typecheck
 ```
 
-## Publishing
-
-Non-prerelease GitHub releases trigger `.github/workflows/publish.yml`.
-The release tag must match the package version (for example, `v0.1.2` for
-`0.1.2`). The workflow runs checks and stages the package on npm; a maintainer
-must review and approve it with 2FA before it is published.
-
-Configure npm Trusted Publishing for `0Tarun0709/pi-pocket` with workflow
-filename `publish.yml`. Direct `npm publish` permission is not needed. A new
-trusted publisher must complete its first successful publish within two days,
-so configure it shortly before a release.
-
 ## License
 
 [MIT](LICENSE)
