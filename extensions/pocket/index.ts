@@ -1,16 +1,18 @@
 import { createServer, type Server } from "node:http";
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { promisify } from "node:util";
 import { readFile, writeFile, unlink, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { createRequire } from "node:module";
+import { basename, dirname, join } from "node:path";
+import { createRequire, stripTypeScriptTypes } from "node:module";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Pairing } from "./auth.ts";
 import { prepareTailscale } from "./tailscale.ts";
+import { openSession, listSessions, sessionRequest, sessionDirectory, sessionId } from "./sessions.ts";
 
-const page = fileURLToPath(new URL("../../web/index.html", import.meta.url));
+const webDir = fileURLToPath(new URL("../../web/", import.meta.url));
 const require = createRequire(import.meta.url);
 const QRCode: typeof import("qrcode") = require("qrcode");
 const execFileAsync = promisify(execFile);
@@ -20,9 +22,11 @@ const localPort = 18790;
 const stateDir = join(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), "pi-pocket");
 const disabledFile = join(stateDir, "remote-disabled");
 const originFile = join(stateDir, "tailscale-origin");
+const directory = sessionDirectory(stateDir);
 
-type ToolMessage = { role: "tool"; id: string; name: string; args: unknown; output?: unknown; state: "running" | "done" | "error" | "unknown" };
-type DisplayMessage = { role: "user" | "assistant"; text: string } | { role: "source"; via: "tailscale" | "local" } | ToolMessage;
+export type ToolMessage = { role: "tool"; id: string; name: string; args: unknown; output?: unknown; state: "running" | "done" | "error" | "unknown" };
+export type TextMessage = { role: "user" | "assistant"; text: string };
+export type DisplayMessage = TextMessage | { role: "source"; via: "tailscale" | "local" } | ToolMessage;
 
 function display(message: any): DisplayMessage | undefined {
   if (message?.role !== "user" && message?.role !== "assistant") return;
@@ -34,6 +38,7 @@ function display(message: any): DisplayMessage | undefined {
 export default function (pi: ExtensionAPI) {
   let server: Server | undefined;
   let localServer: Server | undefined;
+  let shared: Awaited<ReturnType<typeof openSession>> | undefined;
   let messages: DisplayMessage[] = [];
   let streaming: DisplayMessage | undefined;
   let waiting: { kind: string; title?: string } | undefined;
@@ -48,6 +53,7 @@ export default function (pi: ExtensionAPI) {
   let localEnabled = false;
   let remoteEnabled = false;
   let starting = false;
+  let changingModel = false;
 
   function stopServer() {
     generation++;
@@ -55,6 +61,8 @@ export default function (pi: ExtensionAPI) {
     remoteEnabled = false;
     if (queueTimer) clearInterval(queueTimer);
     queueTimer = undefined;
+    shared?.close();
+    shared = undefined;
     const active = [server, localServer];
     server = undefined;
     localServer = undefined;
@@ -226,7 +234,7 @@ export default function (pi: ExtensionAPI) {
       try { await startServer(ctx, true); }
       catch (error) { ctx.ui.notify(`PockPi could not start: ${error}`, "error"); return; }
       const address = localServer?.address();
-      ctx.ui.notify(address && typeof address !== "string" ? `PockPi is available at http://127.0.0.1:${address.port}\nUse /remote pair for Tailscale access.` : "PockPi is not running", "info");
+      ctx.ui.notify(address && typeof address !== "string" ? `PockPi is available at http://127.0.0.1:${address.port}\nUse /remote pair for Tailscale access.` : "Session added to the existing PockPi gateway. Open Sessions on your connected device.", "info");
     },
   });
 
@@ -249,32 +257,60 @@ export default function (pi: ExtensionAPI) {
 
   async function startListeners(ctx: import("@earendil-works/pi-coding-agent").ExtensionContext, isLocal: boolean, startingGeneration: number, activate: boolean) {
     pairing = new Pairing(stateDir);
-    const [html, pairPage, marked, dompurify, highlight] = await Promise.all([
-      readFile(page),
-      readFile(new URL("../../web/pair.html", import.meta.url)),
-      readFile(join(dirname(require.resolve("marked")), "marked.umd.js")),
-      readFile(join(dirname(require.resolve("dompurify")), "purify.min.js")),
-      readFile(require.resolve("@highlightjs/cdn-assets/highlight.min.js")),
+    const assets = new Map(Object.entries({
+      "/app.css": join(webDir, "app.css"),
+      "/app.js": join(webDir, "app.ts"),
+      "/transcript.js": join(webDir, "transcript.ts"),
+      "/pair.js": join(webDir, "pair.ts"),
+      "/marked.js": join(dirname(require.resolve("marked")), "marked.umd.js"),
+      "/purify.js": join(dirname(require.resolve("dompurify")), "purify.min.js"),
+      "/highlight.js": require.resolve("@highlightjs/cdn-assets/highlight.min.js"),
+    }));
+    const [html, pairPage, assetBodies] = await Promise.all([
+      readFile(join(webDir, "index.html")),
+      readFile(join(webDir, "pair.html")),
+      Promise.all([...assets].map(async ([url, path]) => [url, path.endsWith(".ts") ? stripTypeScriptTypes(await readFile(path, "utf8")) : await readFile(path)] as const)),
     ]);
-    const handler = (isLocal: boolean) => async (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => {
+    const staticFiles = new Map(assetBodies);
+    const availableModels = () => {
+      const available = ctx.modelRegistry.getAvailable();
+      const scoped = ctx.scopedModels;
+      return scoped?.length ? available.filter(model => scoped.some(({ model: entry }) => entry.provider === model.provider && entry.id === model.id)) : available;
+    };
+    const handler = (isLocal: boolean, internal = false) => async (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => {
+      const url = (req.url ?? "").split("?", 1)[0];
+      if (internal && req.method === "POST" && url === "/internal/stop-all") {
+        if (!existsSync(disabledFile)) { res.writeHead(403).end(); return; }
+        disabled = true;
+        queued = [];
+        res.once("finish", stopServer);
+        ctx.abort();
+        res.writeHead(204).end();
+        return;
+      }
+      if (internal && (!shared || !sessionActive || disabled || existsSync(disabledFile))) { res.writeHead(503).end(); return; }
+      const info = () => ({ name: ctx.sessionManager.getSessionName?.() || (shared && !localServer ? basename(ctx.cwd) : "Current session"), project: basename(ctx.cwd), busy: !ctx.isIdle(), waiting: Boolean(waiting), gateway: Boolean(server?.listening) });
+      if (internal && req.method === "GET" && url === "/internal/info") { res.writeHead(200).end(JSON.stringify(info())); return; }
+      if (internal && !/^(GET \/api\/(session|models)|POST \/api\/(prompt|stop|model))$/.test(`${req.method} ${url}`)) { res.writeHead(404).end(); return; }
       const host = req.headers.host;
       const address = (isLocal ? localServer : server)?.address();
       const expectedHost = typeof address === "object" && address ? `127.0.0.1:${address.port}` : "";
       const localOrigin = `http://${expectedHost}`;
-      const requestOrigin = host === expectedHost ? localOrigin : !isLocal && remoteOrigin && host === new URL(remoteOrigin).host ? remoteOrigin : undefined;
+      const requestOrigin = internal ? "http://localhost" : host === expectedHost ? localOrigin : !isLocal && remoteOrigin && host === new URL(remoteOrigin).host ? remoteOrigin : undefined;
       if (!requestOrigin || (req.headers.origin && req.headers.origin !== requestOrigin)) {
         res.writeHead(403).end();
         return;
       }
-      if (disabled || (isLocal ? !localEnabled : !remoteEnabled)) { res.writeHead(503).end("PockPi is not active for this address."); return; }
+      if (!internal && (disabled || existsSync(disabledFile) || (isLocal ? !localEnabled : !remoteEnabled))) { res.writeHead(503).end("PockPi is not active for this address."); return; }
       res.setHeader("Cache-Control", "no-store");
       const cookieName = requestOrigin === localOrigin ? "pi-pocket-local" : "__Host-pi-pocket";
       const cookie = req.headers.cookie?.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
-      const browser = pairing.identify(cookie);
+      const browser = internal ? undefined : pairing.identify(cookie);
       if (!isLocal && req.method === "POST" && req.url === "/api/pair") {
         if (req.headers.origin !== requestOrigin || req.headers["content-type"] !== "application/json") { res.writeHead(403).end(); return; }
         let body = "";
         for await (const chunk of req) { body += chunk; if (body.length > 1024) { res.writeHead(413).end(); return; } }
+        if (disabled || !remoteEnabled || existsSync(disabledFile) || (requestOrigin !== localOrigin && requestOrigin !== remoteOrigin)) { res.writeHead(503).end(); return; }
         try {
           const token = pairing.accept(JSON.parse(body).code, req.headers["user-agent"]);
           if (!token) { res.writeHead(401).end("Invalid or expired pairing code."); return; }
@@ -286,13 +322,54 @@ export default function (pi: ExtensionAPI) {
         }
         return;
       }
-      if (req.method === "GET" && (req.url === "/" || req.url === "/pair")) {
+      if (req.method === "GET" && (url === "/" || url === "/pair")) {
         res.setHeader("Referrer-Policy", "no-referrer");
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(isLocal || (browser && req.url === "/") ? html : pairPage);
-      } else if (!isLocal && !browser) {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(isLocal || (browser && url === "/") ? html : pairPage);
+      } else if (!internal && req.method === "GET" && url === "/pair.js") {
+        res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" }).end(staticFiles.get(url));
+      } else if (!internal && !isLocal && !browser) {
         res.writeHead(401).end("Pair this browser using /remote pair on the laptop.");
-      } else if (req.method === "GET" && (req.url === "/marked.js" || req.url === "/purify.js" || req.url === "/highlight.js")) {
-        res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" }).end(req.url === "/marked.js" ? marked : req.url === "/purify.js" ? dompurify : highlight);
+      } else if (!internal && req.method === "GET" && url === "/api/sessions") {
+        const sessions = await listSessions(directory);
+        if (disabled || existsSync(disabledFile) || (!isLocal && (!pairing.identify(cookie) || (requestOrigin !== localOrigin && requestOrigin !== remoteOrigin)))) { res.writeHead(503).end(); return; }
+        res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(sessions));
+      } else if (!internal && /^\/api\/sessions\//.test(url)) {
+        const [, , , id, action, extra] = url.split("/");
+        if (extra !== undefined || !sessionId.test(id) || !/^(GET (session|models)|POST (prompt|stop|model))$/.test(`${req.method} ${action}`)) { res.writeHead(404).end(); return; }
+        let body: string | undefined;
+        if (req.method === "POST") {
+          if (req.headers.origin !== requestOrigin || req.headers["content-type"] !== "application/json") { res.writeHead(403).end(); return; }
+          const limit = action === "prompt" ? 64_000 : 4096;
+          const requestGeneration = generation;
+          body = "";
+          for await (const chunk of req) { body += chunk; if (body.length > limit) { res.writeHead(413).end(); return; } }
+          if (disabled || existsSync(disabledFile) || generation !== requestGeneration || (isLocal ? !localEnabled : !remoteEnabled || !pairing.identify(cookie) || (requestOrigin !== localOrigin && requestOrigin !== remoteOrigin))) { res.writeHead(503).end(); return; }
+        }
+        const outgoing = sessionRequest(directory, id, `/api/${action}`, req.method, {
+          origin: "http://localhost", "content-type": "application/json", "x-pockpi-via": !isLocal && requestOrigin === remoteOrigin ? "tailscale" : "local",
+        });
+        outgoing.on("response", upstream => {
+          if (action === "session" && upstream.statusCode === 200) {
+            void (async () => {
+              try {
+                const chunks = [];
+                for await (const chunk of upstream) chunks.push(chunk);
+                const session = JSON.parse(Buffer.concat(chunks).toString());
+                res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ ...session, local: isLocal, browser }));
+              } catch { if (!res.headersSent) res.writeHead(502).end(); }
+            })();
+          } else {
+            res.writeHead(upstream.statusCode ?? 502, { "Content-Type": upstream.headers["content-type"] ?? "text/plain" });
+            upstream.on("error", () => res.destroy());
+            upstream.pipe(res);
+          }
+        });
+        outgoing.on("error", () => { if (!res.headersSent) res.writeHead(404).end("Session is no longer available."); else res.destroy(); });
+        res.on("close", () => outgoing.destroy());
+        outgoing.end(body);
+      } else if (req.method === "GET" && staticFiles.has(url)) {
+        const type = url.endsWith(".css") ? "text/css" : "text/javascript";
+        res.writeHead(200, { "Content-Type": `${type}; charset=utf-8` }).end(staticFiles.get(url));
       } else if (req.method === "GET" && req.url === "/api/session") {
         res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({
           messages: streaming ? [...messages, streaming] : messages,
@@ -301,7 +378,35 @@ export default function (pi: ExtensionAPI) {
           queued: queued.length,
           browser,
           local: isLocal,
+          name: info().name,
+          project: info().project,
+          id: shared?.id,
+          model: ctx.model && { provider: ctx.model.provider, id: ctx.model.id, name: ctx.model.name },
         }));
+      } else if (req.method === "GET" && req.url === "/api/models") {
+        const models = availableModels().map(({ provider, id, name }) => ({ provider, id, name }));
+        res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(models));
+      } else if (req.method === "POST" && req.url === "/api/model") {
+        if (req.headers.origin !== requestOrigin || req.headers["content-type"] !== "application/json") { res.writeHead(403).end(); return; }
+        const requestGeneration = generation;
+        let body = "";
+        for await (const chunk of req) { body += chunk; if (body.length > 4096) { res.writeHead(413).end(); return; } }
+        let selection;
+        try { selection = JSON.parse(body); } catch { res.writeHead(400).end("Invalid model selection."); return; }
+        if (typeof selection?.provider !== "string" || typeof selection?.id !== "string") { res.writeHead(400).end("Invalid model selection."); return; }
+        if (disabled || existsSync(disabledFile) || generation !== requestGeneration || (!internal && ((isLocal ? !localEnabled : !remoteEnabled) || (!isLocal && (!pairing.identify(cookie) || (requestOrigin !== localOrigin && requestOrigin !== remoteOrigin)))))) {
+          res.writeHead(503).end("Access is no longer active."); return;
+        }
+        if (changingModel || waiting || queued.length || !ctx.isIdle()) { res.writeHead(409).end("Wait for Pi to finish before changing models."); return; }
+        const model = availableModels().find(model => model.provider === selection.provider && model.id === selection.id);
+        if (!model) { res.writeHead(404).end("This model is not available in this session."); return; }
+        changingModel = true;
+        try {
+          if (await pi.setModel(model)) res.writeHead(204).end();
+          else res.writeHead(409).end("This model's provider is not signed in.");
+        } catch {
+          res.writeHead(500).end("Pi could not change models.");
+        } finally { changingModel = false; }
       } else if (req.method === "POST" && req.url === "/api/prompt") {
         if (req.headers.origin !== requestOrigin || req.headers["content-type"] !== "application/json") {
           res.writeHead(403).end();
@@ -315,8 +420,8 @@ export default function (pi: ExtensionAPI) {
         try {
           const { text } = JSON.parse(body);
           if (typeof text !== "string" || !text.trim()) throw new Error("Empty prompt");
-          if (disabled) { res.writeHead(503).end("PockPi disabled"); return; }
-          queued.push({ text: text.trim(), via: !isLocal && requestOrigin === remoteOrigin ? "tailscale" : "local" });
+          if (disabled || !sessionActive || existsSync(disabledFile) || (internal ? !shared : isLocal ? !localEnabled : !remoteEnabled || !pairing.identify(cookie) || (requestOrigin !== localOrigin && requestOrigin !== remoteOrigin))) { res.writeHead(503).end("PockPi access is no longer active."); return; }
+          queued.push({ text: text.trim(), via: (internal ? req.headers["x-pockpi-via"] === "tailscale" : !isLocal && requestOrigin === remoteOrigin) ? "tailscale" : "local" });
           res.writeHead(202).end();
         } catch {
           res.writeHead(400).end("Invalid prompt");
@@ -371,7 +476,14 @@ export default function (pi: ExtensionAPI) {
           res.once("close", closeOnce);
           try {
             await mkdir(stateDir, { recursive: true, mode: 0o700 });
+            const sessions = await listSessions(directory);
             await writeFile(disabledFile, "PockPi disabled. Use /remote enable to restart.\n", { mode: 0o600 });
+            await Promise.all(sessions.filter(({ id }) => id !== shared?.id).map(({ id }) => new Promise<void>(resolve => {
+              const request = sessionRequest(directory, id, "/internal/stop-all", "POST");
+              request.once("response", response => { response.resume(); resolve(); });
+              request.once("error", () => resolve());
+              request.end();
+            })));
             res.writeHead(200).end();
           } catch (error) {
             ctx.ui.notify(`PockPi disabled, but could not persist the lock: ${error}`, "error");
@@ -386,8 +498,20 @@ export default function (pi: ExtensionAPI) {
       }
     };
     if (!sessionActive || disabled || generation !== startingGeneration) throw new Error("PockPi stopped during startup.");
-    server = createServer(handler(false));
-    localServer = createServer(handler(true));
+    const startWorker = async () => {
+      if (shared) return;
+      const worker = await openSession(directory, (req, res) => { void handler(false, true)(req, res).catch(() => { if (!res.headersSent) res.writeHead(500).end(); else res.destroy(); }); });
+      if (!sessionActive || disabled || existsSync(disabledFile) || generation !== startingGeneration) { worker.close(); throw new Error("PockPi stopped during startup."); }
+      shared = worker;
+    };
+    const handle = (isLocal: boolean) => {
+      const route = handler(isLocal);
+      return (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => {
+        void route(req, res).catch(() => { if (!res.headersSent) res.writeHead(500).end(); else res.destroy(); });
+      };
+    };
+    server = createServer(handle(false));
+    localServer = createServer(handle(true));
     const remote = server, local = localServer;
     for (const listener of [remote, local]) listener.on("error", (error) => ctx.ui.notify(`PockPi: ${error.message}`, "error"));
     try {
@@ -399,12 +523,21 @@ export default function (pi: ExtensionAPI) {
       }
       await ensureEnabled();
       if (!sessionActive || disabled || generation !== startingGeneration || server !== remote || localServer !== local) throw new Error("PockPi stopped during startup.");
-    } catch (error) { stopServer(); throw error; }
-    if (activate) { if (isLocal) localEnabled = true; else remoteEnabled = true; }
+    } catch (error) {
+      for (const listener of [remote, local]) { listener.close(); listener.closeAllConnections(); }
+      server = localServer = undefined;
+      if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
+      const gateway = (await listSessions(directory)).find(session => session.gateway);
+      if (!gateway) throw error;
+      if (!isLocal || !activate) throw new Error("Run /remote pair in the Pi session hosting the PockPi gateway.");
+    }
+    try { await startWorker(); } catch (error) { stopServer(); throw error; }
+    if (activate && server) { if (isLocal) localEnabled = true; else remoteEnabled = true; }
     const address = (isLocal ? local : remote).address();
     if (activate && address && typeof address !== "string") ctx.ui.notify(`${isLocal ? "PockPi local" : "PockPi"}: http://127.0.0.1:${address.port}`, "info");
     if (!queueTimer) queueTimer = setInterval(() => {
-      if (!disabled && queued.length && ctx.isIdle()) {
+      if (!disabled && existsSync(disabledFile)) { disabled = true; queued = []; stopServer(); ctx.abort(); return; }
+      if (!disabled && !changingModel && queued.length && ctx.isIdle()) {
         const prompt = queued.shift()!;
         try {
           pi.appendEntry("pi-pocket-prompt", { via: prompt.via });

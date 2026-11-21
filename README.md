@@ -44,25 +44,28 @@ Run `/remote` in Pi, then open **http://127.0.0.1:18790** on the laptop. Local a
 
 Your laptop must remain awake, online, and running Pi. PockPi starts or reuses a private Tailscale Serve route; it never enables Funnel. If Tailscale asks an administrator to enable Serve, follow the displayed link and run `/remote pair` again.
 
-The QR code is a secret: it expires after two minutes, works once, and is invalidated when you generate another. If you can't scan it, press `c` to see the address and pairing code. Run `/remote devices` on the laptop to revoke a paired browser; its ID appears in the Sessions menu. Pairing lasts up to one year and is lost if the browser's data is cleared.
+The QR code is a secret: it expires after two minutes, works once, and is invalidated when you generate another. If you can't scan it, press `c` to see the address and pairing code. Run `/remote devices` on the laptop to revoke a paired browser; its ID appears in the **More actions (…)** menu. Pairing lasts up to one year and is lost if the browser's data is cleared.
 
 ## Session controls
 
+- **Model** lets you choose an available model when Pi is idle. It changes the current session, not your default for new sessions.
 - **Stop execution** requests that Pi stop the current run without disconnecting.
-- **Sessions → Turn off Tailscale access** disconnects devices using the PockPi Serve route. Pi keeps running, and any enabled local access stays available. Run `/remote pair` on the laptop to reconnect. If Serve is shared with another route, PockPi won't remove it automatically. If the phone disconnects before confirming success, check `tailscale serve status` on the laptop.
-- **Sessions → Stop all & disconnect** aborts the run, discards queued PockPi prompts, and disables the server persistently. On the laptop, run `/remote enable`, then `/remote` or `/remote pair` to start again. It cannot undo completed actions or immediately stop tools that ignore cancellation.
+- **More actions (…) → Turn off Tailscale access** disconnects devices using the PockPi Serve route. Pi keeps running, and any enabled local access stays available. Run `/remote pair` on the laptop to reconnect. If Serve is shared with another route, PockPi won't remove it automatically. If the phone disconnects before confirming success, check `tailscale serve status` on the laptop.
+- **More actions (…) → Stop all & disconnect** requests cancellation in all shared sessions, discards queued PockPi prompts, and disables access persistently. On the laptop, run `/remote enable`, then `/remote` or `/remote pair` to start again. It cannot undo completed actions or immediately stop tools that ignore cancellation.
 
-Session switching and answering Pi's interactive dialogs from the browser are not yet supported. Answer those dialogs in the laptop terminal.
+Run `/remote` in each additional Pi session you want to share. Tap the **Pi icon** on your phone to list shared sessions and choose one. Prompts, model changes, and **Stop execution** apply to the selected session. Unshared and saved sessions are not listed. Answer interactive Pi dialogs in the laptop terminal.
 
 ## Security
 
 - The unauthenticated local listener is bound to `127.0.0.1:18790`. **Never proxy or expose this port.** Other processes on the laptop can access it.
 - Tailscale access uses the separate, authenticated listener on port `18789`. Only `/remote pair` enables it. Keep pairing codes and paired devices private.
-- Both ports are reserved while PockPi is running; an access method not enabled returns HTTP 503. Only one Pi session can use them at a time.
+- Both ports are reserved while PockPi is running; an access method not enabled returns HTTP 503. The first sharing session hosts the gateway; additional sessions connect through private local sockets. If the gateway session exits, rerun `/remote` or `/remote pair` in a remaining session.
 - If HTTPS port 443 is already used by another service or Funnel is configured, PockPi refuses to change Serve. Check `tailscale serve status` on the laptop and avoid changing Serve settings concurrently while pairing.
 - Browser credential hashes and the emergency lock are stored in Pi's agent data directory (`~/.pi/agent/`, or `PI_CODING_AGENT_DIR` if set). Device labels are browser-reported, not verified identities.
 
 ## Development
+
+The web UI uses plain TypeScript and CSS in `web/`. The extension strips browser-side types at startup; there is no frontend build step or framework.
 
 Clone the repository, run `npm ci`, and start Pi in the project directory. Grant project trust when prompted. The project package loads through `.pi/settings.json`; use `/reload` after changes. Disable a globally installed copy while developing to avoid a port conflict.
 

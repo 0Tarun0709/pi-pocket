@@ -5,377 +5,54 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111411">
   <title>PockPi</title>
-  <style>
-    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #111411; color: #e9ece6; }
-    * { box-sizing: border-box; }
-    body { margin: 0; }
-    button, textarea { font: inherit; }
-    button { cursor: pointer; }
-    .app { max-width: 680px; height: 100dvh; margin: auto; display: flex; flex-direction: column; background: #171b17; border-inline: 1px solid #292e29; }
-    header { padding: max(20px, env(safe-area-inset-top)) 20px 17px; border-bottom: 1px solid #2c322c; display: flex; justify-content: space-between; align-items: center; }
-    .brand { display: flex; align-items: center; gap: 12px; }
-    .logo { width: 38px; height: 38px; border-radius: 12px; background: #c5e4a4; color: #182117; display: grid; place-items: center; }
-    .logo svg { width: 20px; height: 20px; }
-    h1, h2, p { margin: 0; }
-    h1 { font-size: 16px; letter-spacing: -.02em; }
-    .subtitle { margin-top: 4px; font-size: 12px; color: #909c90; }
-    .badge { color: #aab5a7; background: #252c25; border: 1px solid #343d33; padding: 7px 10px; border-radius: 20px; font-size: 11px; white-space: nowrap; }
-    .badge::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: #899687; vertical-align: 1px; }
-    html .badge[data-working="true"] { color: #196a37; background: #dcfce7; border-color: #86c99d; }
-    .badge[data-working="true"]::before { background: #218347; }
-    main { flex: 1; overflow-y: auto; padding: 26px 20px; }
-    .session { display: flex; align-items: center; gap: 9px; color: #8d998c; font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
-    .session::after { content: ''; height: 1px; background: #303630; flex: 1; }
-    .intro { padding: 38px 0 24px; }
-    .eyebrow { color: #b8d59e; font-size: 12px; font-weight: 600; margin-bottom: 10px; }
-    h2 { font-size: 25px; line-height: 1.2; letter-spacing: -.04em; }
-    .intro p:last-child { color: #9aa59a; line-height: 1.55; font-size: 14px; margin-top: 10px; max-width: 380px; }
-    .message { margin: 18px 0; }
-    .source-label { margin: 18px 0 -12px; font-size: 11px; color: var(--muted, #98a598); text-align: right; }
-    .role { color: #98a598; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 9px; }
-    .bubble { padding: 15px 16px; border: 1px solid #303830; background: #202620; border-radius: 4px 16px 16px 16px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .message.user .bubble { background: #303c2e; border-color: #40513b; border-radius: 16px 4px 16px 16px; }
-    .tool { margin: 10px 0; border: 1px solid #465046; border-radius: 12px; background: #202620; overflow: hidden; }
-    .tool summary { padding: 12px 14px; cursor: pointer; font-size: 13px; overflow-wrap: anywhere; }
-    .tool summary strong { font-weight: 700; }
-    .tool summary .tool-state { float: right; color: #98a598; font-size: 11px; margin-left: 8px; }
-    .tool summary .tool-preview { display: block; margin: 9px 0 0; padding: 0; color: inherit; font: 12px/1.5 monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
-    .tool[open] summary .tool-preview { display: none; }
-    .tool .diff-add { color: #78c88f; } .tool .diff-remove { color: #ed8c91; }
-    .hljs-keyword, .hljs-selector-tag, .hljs-literal { color: #c792ea; }
-    .hljs-string, .hljs-attr, .hljs-addition { color: #8acb88; }
-    .hljs-number, .hljs-symbol, .hljs-variable, .hljs-template-variable { color: #edb777; }
-    .hljs-title, .hljs-function, .hljs-attribute { color: #87baf2; }
-    .hljs-comment, .hljs-quote { color: #929ba5; font-style: italic; }
-    html[data-theme="light"] .hljs-keyword, html[data-theme="light"] .hljs-selector-tag, html[data-theme="light"] .hljs-literal { color: #803ea0; }
-    html[data-theme="light"] .hljs-string, html[data-theme="light"] .hljs-attr { color: #287c35; }
-    html[data-theme="light"] .hljs-number, html[data-theme="light"] .hljs-symbol { color: #a24e00; }
-    html[data-theme="light"] .hljs-title, html[data-theme="light"] .hljs-function { color: #215f9e; }
-    html[data-theme="light"] .tool .diff-add { color: #187338; } html[data-theme="light"] .tool .diff-remove { color: #b62c36; }
-    .tool-body { padding: 0 14px 14px; font-size: 12px; }
-    .tool-body h3 { font-size: 11px; text-transform: uppercase; color: #98a598; margin: 12px 0 6px; }
-    .tool-body pre { margin: 0; padding: 10px; background: #151a15; border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto; }
-    html:not([data-theme="forest"]) .tool { background: var(--panel); border-color: var(--border); }
-    html:not([data-theme="forest"]) .tool-body pre { background: var(--code); }
-    html:not([data-theme="forest"]) .tool-body h3 { color: var(--muted); }
-    .markdown { white-space: normal; }
-    .markdown > :first-child { margin-top: 0; }
-    .markdown > :last-child { margin-bottom: 0; }
-    .markdown p, .markdown ul, .markdown ol, .markdown blockquote { margin: .7em 0; }
-    .markdown h1, .markdown h2, .markdown h3, .markdown h4 { margin: 1em 0 .5em; line-height: 1.3; }
-    .markdown h1 { font-size: 1.5em; } .markdown h2 { font-size: 1.3em; } .markdown h3 { font-size: 1.15em; }
-    .markdown a { color: #c5e4a4; }
-    .markdown code { background: #303830; border-radius: 4px; padding: .15em .3em; font-size: .9em; }
-    .markdown pre { overflow-x: auto; background: #151a15; padding: 12px; border-radius: 8px; }
-    .markdown pre code { padding: 0; background: none; }
-    .markdown blockquote { border-left: 3px solid #718a69; padding-left: 12px; color: #b8c4b5; }
-    .markdown .table-scroll { overflow-x: auto; }
-    .markdown table { border-collapse: collapse; width: 100%; }
-    .markdown th, .markdown td { border: 1px solid #465046; padding: 6px 9px; text-align: left; }
-    .markdown input[type="checkbox"] { margin-right: .4em; }
-    .example { margin-top: 28px; padding: 13px 14px; border: 1px dashed #394339; border-radius: 12px; color: #a8b4a5; font-size: 12px; line-height: 1.5; }
-    footer { padding: 12px 16px max(16px, env(safe-area-inset-bottom)); border-top: 1px solid #2c322c; }
-    .composer { display: flex; align-items: end; gap: 10px; padding: 10px; background: #222822; border: 1px solid #394339; border-radius: 16px; }
-    textarea { flex: 1; resize: none; min-height: 42px; max-height: 120px; padding: 10px 4px; background: transparent; color: #ecf1e9; border: 0; outline: 0; line-height: 1.4; }
-    textarea::placeholder { color: #879387; }
-    button { width: 42px; height: 42px; flex: none; border: 0; border-radius: 11px; background: #c5e4a4; color: #192218; font-size: 21px; }
-    button:focus-visible, textarea:focus-visible { outline: 2px solid #c5e4a4; outline-offset: 2px; }
-    .footnote { text-align: center; color: #899588; font-size: 11px; margin-top: 10px; }
-    .header-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
-    .sessions { position: relative; }
-    .sessions summary { list-style: none; cursor: pointer; font-size: 12px; padding: 7px 9px; border: 1px solid #465046; border-radius: 8px; }
-    .sessions summary::-webkit-details-marker { display: none; }
-    .sessions summary:focus-visible { outline: 2px solid #c5e4a4; outline-offset: 2px; }
-    .sessions-panel { position: absolute; z-index: 2; right: 0; top: calc(100% + 8px); width: 240px; padding: 16px; background: #252c25; border: 1px solid #465046; border-radius: 12px; box-shadow: 0 8px 24px #0004; font-size: 13px; }
-    .sessions-panel p { margin-top: 8px; color: #a8b4a5; line-height: 1.5; overflow-wrap: anywhere; }
-    .sessions-panel button { display: block; width: 100%; height: auto; margin-top: 10px; padding: 9px; border: 1px solid #657361; border-radius: 8px; background: transparent; color: inherit; font-size: 12px; text-align: left; }
-    html .sessions-panel button.danger { display: flex; align-items: center; gap: 8px; background: #c83232; color: #fff; border-color: #c83232; font-weight: 700; }
-    html .sessions-panel button.danger:hover { background: #a92323; border-color: #a92323; }
-    .sessions-panel button.danger svg { flex: none; }
-    html:not([data-theme="forest"]) .sessions summary, html:not([data-theme="forest"]) .sessions-panel { background: var(--panel); border-color: var(--border); color: var(--text); }
-    html:not([data-theme="forest"]) .sessions-panel p { color: var(--muted); }
-    select { font: inherit; font-size: 12px; color: inherit; background: #252c25; border: 1px solid #465046; border-radius: 8px; padding: 7px; max-width: 110px; }
-    select:focus-visible { outline: 2px solid #c5e4a4; outline-offset: 2px; }
-    html:not([data-theme="forest"]) { --bg: #101114; --surface: #191b20; --panel: #24272e; --user: #303845; --border: #454b55; --text: #eef0f4; --muted: #b2b8c2; --accent: #a9c7ff; --accent-text: #111a29; --code: #121419; background: var(--bg); color: var(--text); }
-    html[data-theme="light"] { color-scheme: light; --bg: #e9edf3; --surface: #ffffff; --panel: #f1f3f7; --user: #e2ebfa; --border: #b8c2d1; --text: #192332; --muted: #526173; --accent: #315ca6; --accent-text: #ffffff; --code: #e5eaf1; }
-    html:not([data-theme="forest"]) .app { background: var(--surface); border-color: var(--border); }
-    html:not([data-theme="forest"]) header, html:not([data-theme="forest"]) footer { border-color: var(--border); }
-    html:not([data-theme="forest"]) .subtitle, html:not([data-theme="forest"]) .session, html:not([data-theme="forest"]) .role, html:not([data-theme="forest"]) .footnote, html:not([data-theme="forest"]) .example, html:not([data-theme="forest"]) .markdown blockquote { color: var(--muted); }
-    html:not([data-theme="forest"]) .badge, html:not([data-theme="forest"]) select, html:not([data-theme="forest"]) .composer, html:not([data-theme="forest"]) .bubble { background: var(--panel); color: var(--text); border-color: var(--border); }
-    html:not([data-theme="forest"]) .message.user .bubble { background: var(--user); border-color: var(--border); }
-    html:not([data-theme="forest"]) .logo, html:not([data-theme="forest"]) button { background: var(--accent); color: var(--accent-text); }
-    html:not([data-theme="forest"]) .markdown a { color: var(--accent); }
-    html:not([data-theme="forest"]) .markdown code { background: var(--panel); }
-    html:not([data-theme="forest"]) .markdown pre { background: var(--code); }
-    html:not([data-theme="forest"]) .markdown pre code { background: none; }
-    html:not([data-theme="forest"]) .markdown th, html:not([data-theme="forest"]) .markdown td, html:not([data-theme="forest"]) .example { border-color: var(--border); }
-    html:not([data-theme="forest"]) textarea { color: var(--text); }
-    html:not([data-theme="forest"]) textarea::placeholder { color: var(--muted); }
-    html:not([data-theme="forest"]) :is(button, textarea, select):focus-visible { outline-color: var(--accent); }
-    @media (max-width: 380px) { .subtitle { display: none; } }
-  </style>
+  <link rel="stylesheet" href="/app.css">
 </head>
 <body>
   <div class="app">
     <header>
-      <div class="brand"><div class="logo" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" fill="currentColor"><path d="M0 0 H300 V200 H200 V100 H0 Z"/><path d="M0 100 H100 V200 H200 V300 H100 V400 H0 Z"/><rect x="300" y="200" width="100" height="200"/></svg></div><div><h1>PockPi</h1><p class="subtitle">Your agent, wherever you are</p></div></div>
+      <div class="brand"><button type="button" class="logo" id="open-sessions" aria-label="Open sessions" aria-haspopup="dialog" aria-controls="session-drawer"><svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" fill="currentColor"><path d="M0 0 H300 V200 H200 V100 H0 Z"/><path d="M0 100 H100 V200 H200 V300 H100 V400 H0 Z"/><rect x="300" y="200" width="100" height="200"/></svg></button><div><h1 id="active-session-name">PockPi</h1><p class="subtitle" id="active-project"></p></div></div>
       <div class="header-actions">
-        <span class="badge" id="status">Connecting</span>
-        <details class="sessions">
-          <summary>Sessions</summary>
-          <div class="sessions-panel"><strong>Session actions</strong><p id="browser-label">This browser: checking…</p><button type="button" id="disconnect-tailscale">Turn off Tailscale access</button><button type="button" class="danger" id="stop-all"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>Stop all &amp; disconnect</button><p>Session switching is not connected yet.</p></div>
-        </details>
-        <select id="theme" aria-label="Choose color theme">
+        <details class="header-menu actions" name="header-menu">
+          <summary aria-label="More actions"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></summary>
+          <div class="sessions-panel"><strong>Connection actions</strong><label for="theme">Theme</label> <select id="theme" aria-label="Choose color theme">
           <option value="graphite">Graphite</option>
           <option value="light">Light</option>
           <option value="forest">Forest</option>
-        </select>
+        </select><p id="browser-label">This browser: checking…</p><button type="button" id="disconnect-tailscale">Turn off Tailscale access</button><button type="button" class="danger" id="stop-all"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>Stop all &amp; disconnect</button></div>
+        </details>
       </div>
     </header>
     <main id="conversation" aria-label="Conversation">
-      <div class="session">Current session</div>
       <div id="messages"></div>
       <div class="example" id="notice" role="status">Connecting to Pi…</div>
     </main>
     <footer>
-      <form class="composer" id="composer"><textarea id="prompt" rows="1" aria-label="Message Pi" placeholder="Message Pi…"></textarea><button type="submit" aria-label="Send message">↑</button></form>
-      <p class="footnote">Use the stop button to interrupt Pi while it is working.</p>
+      <div class="composer"><form id="composer"></form><textarea form="composer" id="prompt" rows="2" aria-label="Message Pi" placeholder="Message Pi…"></textarea><div class="composer-row"><details class="header-menu model-picker" name="header-menu">
+          <summary>Model</summary>
+          <form class="sessions-panel" id="model-form">
+            <p id="current-model">Current model: checking…</p>
+            <label for="model-choice">Choose a model</label>
+            <select id="model-choice" required disabled></select>
+            <button type="submit" disabled>Switch model</button>
+            <p id="model-notice" role="status"></p>
+          </form>
+        </details><button form="composer" id="composer-submit" type="submit" aria-label="Send message"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="send-icon" d="M12 19V5m-6 6 6-6 6 6"/><rect class="stop-icon" x="7" y="7" width="10" height="10" rx="2" fill="currentColor" hidden/></svg></button></div></div>
+      <div class="session-footer"><span class="badge" id="status">Connecting</span><p class="footnote"></p></div>
     </footer>
   </div>
+  <dialog class="session-drawer" id="session-drawer" aria-labelledby="drawer-title">
+    <div class="drawer-heading">
+      <h2 id="drawer-title">Sessions</h2>
+      <button type="button" id="close-sessions" aria-label="Close sessions" autofocus><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    </div>
+    <input type="search" id="session-search" aria-label="Search shared sessions" placeholder="Search sessions">
+    <p id="session-empty">Connecting to Pi…</p>
+    <ul class="session-list" hidden></ul>
+  </dialog>
   <script src="/marked.js"></script>
   <script src="/purify.js"></script>
   <script src="/highlight.js"></script>
-  <script>
-    const theme = document.querySelector('#theme');
-    const savedTheme = document.cookie.split('; ').find(row => row.startsWith('pi-remote-theme='))?.split('=')[1];
-    if ([...theme.options].some(option => option.value === savedTheme)) theme.value = savedTheme;
-    document.documentElement.dataset.theme = theme.value;
-    theme.addEventListener('change', () => {
-      document.documentElement.dataset.theme = theme.value;
-      document.cookie = `pi-remote-theme=${theme.value}; Max-Age=31536000; Path=/; SameSite=Strict`;
-    });
-    const form = document.querySelector('#composer');
-    const prompt = document.querySelector('#prompt');
-    const conversation = document.querySelector('#conversation');
-    const messages = document.querySelector('#messages');
-    const status = document.querySelector('#status');
-    const notice = document.querySelector('#notice');
-    const button = form.querySelector('button');
-    let lastMessages = '';
-    let stoppedAll = false;
-    let busy = false;
-    let actionNotice = '';
-    function updateSendButton() {
-      button.setAttribute('aria-label', busy ? 'Stop execution' : 'Send message');
-      button.textContent = busy ? '■' : '↑';
-    }
-    async function stop(all) {
-      if (all && !confirm('Stop Pi, discard queued web prompts, and disable PockPi? Re-enable it from the laptop with /remote enable.')) return;
-      try {
-        const response = await fetch(all ? '/api/stop-all' : '/api/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-        if (!response.ok) throw new Error(await response.text());
-        if (all) {
-          stoppedAll = true;
-          status.textContent = 'Disabled';
-          status.dataset.working = 'false';
-          notice.hidden = false;
-          notice.textContent = 'PockPi is disabled. Use /remote enable in the laptop terminal to enable it.';
-          button.disabled = true;
-        }
-      } catch (error) {
-        notice.hidden = false;
-        notice.textContent = `Could not complete the stop request: ${error.message}`;
-      }
-    }
-    document.querySelector('#stop-all').addEventListener('click', () => stop(true));
-    document.querySelector('#disconnect-tailscale').addEventListener('click', async (event) => {
-      if (!confirm('Turn off PockPi’s Tailscale connection for all devices? Pi will keep running on the laptop.')) return;
-      const control = event.currentTarget;
-      control.disabled = true;
-      actionNotice = 'Turning off Tailscale access…';
-      notice.hidden = false;
-      notice.textContent = actionNotice;
-      try {
-        const response = await fetch('/api/disconnect-tailscale', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
-        if (!response.ok) throw new Error(await response.text());
-        actionNotice = 'Tailscale access is off. Pi is still running on the laptop.';
-        notice.textContent = actionNotice;
-        if (location.protocol === 'https:') {
-          stoppedAll = true;
-          status.textContent = 'Disconnected';
-          status.dataset.working = 'false';
-          button.disabled = true;
-        }
-      } catch (error) {
-        if (error instanceof TypeError && location.protocol === 'https:') {
-          stoppedAll = true;
-          status.textContent = 'Connection lost';
-          status.dataset.working = 'false';
-          button.disabled = true;
-          actionNotice = 'Connection lost while turning off access. Check Tailscale Serve on the laptop to confirm.';
-          notice.textContent = actionNotice;
-        } else {
-          actionNotice = `Could not turn off Tailscale access: ${error.message}`;
-          notice.textContent = actionNotice;
-          control.disabled = false;
-        }
-      }
-    });
-    const openTools = new Set();
-    function toolText(output) {
-      const content = Array.isArray(output) ? output : output?.content;
-      if (typeof content === 'string') return content;
-      if (Array.isArray(content)) return content.map(part => part.type === 'text' ? part.text : `[${part.type || 'attachment'}]`).join('\n');
-      return typeof output === 'string' ? output : '';
-    }
-    function toolTitle(item) {
-      const args = item.args || {};
-      const path = args.file_path ?? args.path ?? '';
-      if (item.name === 'bash' || item.name === 'powershell') return `${item.name === 'bash' ? '$' : '>'} ${args.command || '…'}`;
-      if (item.name === 'grep') return `grep /${args.pattern || ''}/ in ${path || '.'}`;
-      if (item.name === 'find') return `find ${args.pattern || ''} in ${path || '.'}`;
-      return `${item.name}${path ? ` ${path}` : ''}`;
-    }
-    function codeBlock(text, path, diff = false) {
-      const pre = document.createElement('pre');
-      const code = document.createElement('code');
-      code.textContent = text;
-      const extension = path?.split('.').pop()?.toLowerCase();
-      const aliases = { js: 'javascript', ts: 'typescript', tsx: 'typescript', jsx: 'javascript', py: 'python', sh: 'bash', yml: 'yaml', clj: 'clojure', html: 'xml' };
-      const language = aliases[extension] || extension;
-      if (!diff && language && hljs.getLanguage(language)) {
-        code.className = `language-${language}`;
-        hljs.highlightElement(code);
-      }
-      if (diff) {
-        code.replaceChildren(...text.split('\n').flatMap((line, index) => {
-          const span = document.createElement('span');
-          span.className = /^\s*\+/.test(line) ? 'diff-add' : /^\s*-/.test(line) ? 'diff-remove' : '';
-          span.textContent = line;
-          return index ? [document.createTextNode('\n'), span] : [span];
-        }));
-      }
-      pre.append(code);
-      return pre;
-    }
-    function renderTool(item) {
-      const details = document.createElement('details');
-      details.className = 'tool';
-      details.open = openTools.has(item.id);
-      details.addEventListener('toggle', () => {
-        if (details.open) openTools.add(item.id); else openTools.delete(item.id);
-      });
-      const args = item.args || {};
-      const path = args.file_path ?? args.path;
-      const output = toolText(item.output);
-      const diff = item.name === 'edit' && typeof item.output?.details?.diff === 'string' ? item.output.details.diff : '';
-      const content = diff || (item.name === 'write' && item.state !== 'error' ? args.content : output) || '';
-      const summary = document.createElement('summary');
-      const title = document.createElement('strong');
-      title.textContent = toolTitle(item);
-      const state = document.createElement('span');
-      state.className = 'tool-state';
-      state.textContent = item.state === 'unknown' ? 'result unavailable' : item.state;
-      summary.append(title, state);
-      if (content && item.name !== 'read') {
-        const lines = content.trimEnd().split('\n');
-        const limit = item.name === 'bash' || item.name === 'powershell' ? 5 : 10;
-        const previewText = (item.name === 'bash' || item.name === 'powershell' ? lines.slice(-limit) : lines.slice(0, limit)).join('\n') + (lines.length > limit ? `\n… ${lines.length - limit} more lines` : '');
-        const preview = codeBlock(previewText, path, Boolean(diff));
-        preview.className = 'tool-preview';
-        summary.append(preview);
-      }
-      const body = document.createElement('div');
-      body.className = 'tool-body';
-      if (content) body.append(codeBlock(content, path, Boolean(diff)));
-      if (item.state === 'error' && diff && output) body.append(codeBlock(output));
-      if (!content && item.args && !['read', 'bash', 'powershell', 'write', 'edit', 'grep', 'find', 'ls'].includes(item.name)) body.append(codeBlock(JSON.stringify(item.args, null, 2)));
-      details.append(summary, body);
-      return details;
-    }
-    async function refresh() {
-      if (stoppedAll) return;
-      try {
-        const response = await fetch('/api/session', { cache: 'no-store' });
-        if (response.status === 401) { location.replace('/pair'); return; }
-        if (!response.ok) throw new Error('Disconnected');
-        const session = await response.json();
-        busy = session.busy;
-        updateSendButton();
-        status.textContent = session.waiting ? 'Waiting for input' : session.busy ? 'Working' : 'Connected';
-        status.dataset.working = String(session.busy && !session.waiting);
-        if (session.local) document.querySelector('#browser-label').textContent = 'This browser: local access';
-        else if (session.browser) document.querySelector('#browser-label').textContent = `This browser: ${session.browser.label} · ${session.browser.id}`;
-        document.querySelector('.footnote').textContent = session.queued ? `${session.queued} web prompt${session.queued === 1 ? '' : 's'} queued.` : 'Use the stop button to interrupt Pi while it is working.';
-        notice.hidden = !session.waiting && !actionNotice;
-        if (session.waiting) notice.textContent = `Pi is waiting for ${session.waiting.title || session.waiting.kind}. Answer it in the laptop terminal; remote answers are not supported yet.`;
-        else if (actionNotice) notice.textContent = actionNotice;
-        const serialized = JSON.stringify(session.messages);
-        if (serialized === lastMessages) return;
-        lastMessages = serialized;
-        const nearBottom = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 100;
-        messages.replaceChildren(...session.messages.map((item) => {
-          if (item.role === 'tool') return renderTool(item);
-          if (item.role === 'source') {
-            const source = document.createElement('div');
-            source.className = 'source-label';
-            source.textContent = item.via === 'tailscale' ? 'PockPi · Tailscale address' : 'PockPi · local address';
-            return source;
-          }
-          const message = document.createElement('div');
-          message.className = `message ${item.role === 'user' ? 'user' : ''}`;
-          const role = document.createElement('div');
-          role.className = 'role';
-          role.textContent = item.role === 'user' ? 'You' : 'Pi';
-          const bubble = document.createElement('div');
-          bubble.className = 'bubble';
-          if (item.role === 'assistant') {
-            bubble.classList.add('markdown');
-            bubble.innerHTML = DOMPurify.sanitize(marked.parse(item.text), {
-              USE_PROFILES: { html: true },
-              FORBID_TAGS: ['img', 'style', 'form'],
-            });
-            for (const code of bubble.querySelectorAll('pre code[class*="language-"]')) {
-              if (hljs.getLanguage(code.className.match(/language-([^\s]+)/)?.[1])) hljs.highlightElement(code);
-            }
-            for (const table of bubble.querySelectorAll('table')) {
-              const wrapper = document.createElement('div');
-              wrapper.className = 'table-scroll';
-              table.replaceWith(wrapper);
-              wrapper.append(table);
-            }
-          } else {
-            bubble.textContent = item.text;
-          }
-          message.append(role, bubble);
-          return message;
-        }));
-        if (nearBottom) conversation.scrollTop = conversation.scrollHeight;
-      } catch {
-        status.textContent = 'Disconnected';
-        status.dataset.working = 'false';
-        notice.hidden = false;
-        notice.textContent = 'Cannot connect to Pi. Open the address shown by the extension, not this HTML file directly.';
-      }
-    }
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      if (busy) { await stop(false); return; }
-      const text = prompt.value.trim();
-      if (!text) return;
-      button.disabled = true;
-      try {
-        const response = await fetch('/api/prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
-        if (!response.ok) throw new Error('Send failed');
-        if (prompt.value.trim() === text) prompt.value = '';
-        await refresh();
-      } catch {
-        notice.hidden = false;
-        notice.textContent = 'Could not send. Your message is still in the composer.';
-      } finally { button.disabled = false; }
-    });
-    refresh();
-    setInterval(refresh, 1500);
-  </script>
+  <script src="/transcript.js"></script>
+  <script src="/app.js"></script>
 </body>
 </html>
