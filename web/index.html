@@ -31,6 +31,7 @@
     h2 { font-size: 25px; line-height: 1.2; letter-spacing: -.04em; }
     .intro p:last-child { color: #9aa59a; line-height: 1.55; font-size: 14px; margin-top: 10px; max-width: 380px; }
     .message { margin: 18px 0; }
+    .source-label { margin: 18px 0 -12px; font-size: 11px; color: var(--muted, #98a598); text-align: right; }
     .role { color: #98a598; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 9px; }
     .bubble { padding: 15px 16px; border: 1px solid #303830; background: #202620; border-radius: 4px 16px 16px 16px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
     .message.user .bubble { background: #303c2e; border-color: #40513b; border-radius: 16px 4px 16px 16px; }
@@ -122,7 +123,7 @@
         <span class="badge" id="status">Connecting</span>
         <details class="sessions">
           <summary>Sessions</summary>
-          <div class="sessions-panel"><strong>Session actions</strong><button type="button" class="danger" id="stop-all"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>Stop all &amp; disconnect</button><p>Session switching is not connected yet.</p></div>
+          <div class="sessions-panel"><strong>Session actions</strong><button type="button" id="disconnect-tailscale">Turn off Tailscale access</button><button type="button" class="danger" id="stop-all"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>Stop all &amp; disconnect</button><p>Session switching is not connected yet.</p></div>
         </details>
         <select id="theme" aria-label="Choose color theme">
           <option value="graphite">Graphite</option>
@@ -163,6 +164,7 @@
     let lastMessages = '';
     let stoppedAll = false;
     let busy = false;
+    let actionNotice = '';
     function updateSendButton() {
       button.setAttribute('aria-label', busy ? 'Stop execution' : 'Send message');
       button.textContent = busy ? '■' : '↑';
@@ -186,6 +188,39 @@
       }
     }
     document.querySelector('#stop-all').addEventListener('click', () => stop(true));
+    document.querySelector('#disconnect-tailscale').addEventListener('click', async (event) => {
+      if (!confirm('Turn off Pi Pocket’s Tailscale connection for all devices? Pi will keep running on the laptop.')) return;
+      const control = event.currentTarget;
+      control.disabled = true;
+      actionNotice = 'Turning off Tailscale access…';
+      notice.hidden = false;
+      notice.textContent = actionNotice;
+      try {
+        const response = await fetch('/api/disconnect-tailscale', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+        if (!response.ok) throw new Error(await response.text());
+        actionNotice = 'Tailscale access is off. Pi is still running on the laptop.';
+        notice.textContent = actionNotice;
+        if (location.protocol === 'https:') {
+          stoppedAll = true;
+          status.textContent = 'Disconnected';
+          status.dataset.working = 'false';
+          button.disabled = true;
+        }
+      } catch (error) {
+        if (error instanceof TypeError && location.protocol === 'https:') {
+          stoppedAll = true;
+          status.textContent = 'Connection lost';
+          status.dataset.working = 'false';
+          button.disabled = true;
+          actionNotice = 'Connection lost while turning off access. Check Tailscale Serve on the laptop to confirm.';
+          notice.textContent = actionNotice;
+        } else {
+          actionNotice = `Could not turn off Tailscale access: ${error.message}`;
+          notice.textContent = actionNotice;
+          control.disabled = false;
+        }
+      }
+    });
     const openTools = new Set();
     function toolText(output) {
       const content = Array.isArray(output) ? output : output?.content;
@@ -269,14 +304,21 @@
         status.textContent = session.waiting ? 'Waiting for input' : session.busy ? 'Working' : 'Connected';
         status.dataset.working = String(session.busy && !session.waiting);
         document.querySelector('.footnote').textContent = session.queued ? `${session.queued} web prompt${session.queued === 1 ? '' : 's'} queued.` : 'Use the stop button to interrupt Pi while it is working.';
-        notice.hidden = !session.waiting;
+        notice.hidden = !session.waiting && !actionNotice;
         if (session.waiting) notice.textContent = `Pi is waiting for ${session.waiting.title || session.waiting.kind}. Answer it in the laptop terminal; remote answers are not supported yet.`;
+        else if (actionNotice) notice.textContent = actionNotice;
         const serialized = JSON.stringify(session.messages);
         if (serialized === lastMessages) return;
         lastMessages = serialized;
         const nearBottom = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 100;
         messages.replaceChildren(...session.messages.map((item) => {
           if (item.role === 'tool') return renderTool(item);
+          if (item.role === 'source') {
+            const source = document.createElement('div');
+            source.className = 'source-label';
+            source.textContent = item.via === 'tailscale' ? 'Pi Pocket · Tailscale address' : 'Pi Pocket · local address';
+            return source;
+          }
           const message = document.createElement('div');
           message.className = `message ${item.role === 'user' ? 'user' : ''}`;
           const role = document.createElement('div');

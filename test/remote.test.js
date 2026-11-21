@@ -12,13 +12,14 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
   const { default: extension } = await import('../extensions/pocket/index.ts');
   const events = {}, commands = {};
   let url, key, busy = false, aborts = 0;
-  extension({ registerCommand(name, command) { commands[name] = command; }, on(name, handler) { events[name] = handler; }, sendUserMessage() {} });
+  extension({ registerCommand(name, command) { commands[name] = command; }, registerEntryRenderer() {}, on(name, handler) { events[name] = handler; }, sendUserMessage() {} });
   // Tests use an ephemeral port so an active Pi Remote session can keep its fixed port.
   const listen = Server.prototype.listen;
   Server.prototype.listen = function (_port, host, callback) { return listen.call(this, 0, host, callback); };
   const ctx = {
     cwd: state,
     sessionManager: { getBranch: () => [
+      { type: 'custom', customType: 'pi-pocket-prompt', data: { via: 'tailscale' } },
       { type: 'message', message: { role: 'user', content: '**literal**' } },
       { type: 'message', message: { role: 'assistant', content: [ { type: 'text', text: '# Heading\n\n**bold**\n\n| A | B |\n| - | - |\n| 1 | 2 |\n\n```js\nhello()\n```\n\n<img src=x onerror="alert(1)"><script>alert(1)</script> [bad](javascript:alert(1))' }, { type: 'toolCall', id: 'old', name: 'read', arguments: { path: 'x' } } ] } },
       { type: 'message', message: { role: 'toolResult', toolCallId: 'old', toolName: 'read', content: [{ type: 'text', text: 'file contents' }], isError: false } },
@@ -53,6 +54,7 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
     theme.dispatchEvent(new dom.window.Event('change'));
     assert.equal(document.documentElement.dataset.theme, 'light');
     assert.match(document.cookie, /pi-remote-theme=light/);
+    assert.equal(document.querySelector('.source-label').textContent, 'Pi Pocket · Tailscale address');
     assert.equal(document.querySelector('.message.user .bubble').textContent, '**literal**');
     assert.equal(document.querySelector('.markdown h1').textContent, 'Heading');
     assert.equal(document.querySelector('.markdown strong').textContent, 'bold');
@@ -90,6 +92,19 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
     busy = false;
     await new Promise(resolve => setTimeout(resolve, 1600));
     assert.equal(send.getAttribute('aria-label'), 'Send message');
+    let disconnects = 0;
+    const originalFetch = dom.window.fetch;
+    dom.window.fetch = (path, options) => path === '/api/disconnect-tailscale'
+      ? (disconnects++, Promise.resolve({ ok: true })) : originalFetch(path, options);
+    dom.window.confirm = () => false;
+    document.querySelector('#disconnect-tailscale').click();
+    assert.equal(disconnects, 0);
+    dom.window.confirm = () => true;
+    document.querySelector('#disconnect-tailscale').click();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(disconnects, 1);
+    assert.match(document.querySelector('#notice').textContent, /Tailscale access is off/);
+    assert.equal(aborts, 1);
   } finally {
     dom?.window.close();
     await events.session_shutdown();

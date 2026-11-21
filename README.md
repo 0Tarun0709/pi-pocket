@@ -20,6 +20,7 @@ Clone this repository, run `npm ci`, and start Pi in the repository. The project
 
 - View the current conversation, streaming responses, and expandable tool activity.
 - Send prompts, change themes, and stop an active run from the composer.
+- Use **Sessions → Turn off Tailscale access** to disconnect all devices using the Pi Pocket Serve route without stopping Pi or local access. The button only removes an exclusive matching Serve configuration; if other routes share it, disable the route manually on the laptop.
 - Use **Sessions → Stop all & disconnect** to abort the run, discard queued web prompts, and disable the web server. Run `/remote enable` in the laptop terminal to enable it again. The disabled state persists in `~/.pi/agent/pi-pocket/` (or under `PI_CODING_AGENT_DIR`) across package updates and projects. This does not undo actions already performed or immediately stop tools that ignore cancellation.
 
 Session switching and answering Pi's interactive dialogs from the web interface are not implemented. A notification appears when Pi is waiting for terminal input.
@@ -40,7 +41,9 @@ tailscale serve --bg 18789
 
 Follow Tailscale's instructions if HTTPS needs enabling. Open the HTTPS URL shown by `tailscale serve status` on your phone, and enter username `pocket` and the access key from `/remote`. The phone must be connected to Tailscale. Never use Funnel for Pi Pocket.
 
-To remove remote access, run `tailscale serve --https=443 off` in the Mac terminal and `/remote unshare` in Pi. The latter removes the allowed origin but does not change Serve settings. If other services use Serve, inspect `tailscale serve status` first and avoid removing their configuration.
+To remove remote access, use the Tailscale button. It removes both the Serve route and Pi Pocket's allowed Tailscale origin. The phone connection can close before the button receives confirmation; check `tailscale serve status` on the laptop if unsure. To reconnect, run `/remote share <hostname>` in Pi and `tailscale serve --bg 18789` in the laptop terminal.
+
+Alternatively, manage Serve manually with `tailscale serve --https=443 off` and remove the allowed origin with `/remote unshare`. If other services use Serve, inspect its configuration first and avoid removing their routes.
 
 ## Security
 

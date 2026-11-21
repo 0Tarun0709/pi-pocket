@@ -1,5 +1,7 @@
 import { createServer, type Server } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { readFile, writeFile, unlink, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -9,13 +11,14 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const page = fileURLToPath(new URL("../../web/index.html", import.meta.url));
 const require = createRequire(import.meta.url);
+const execFileAsync = promisify(execFile);
 const port = 18789;
 const stateDir = join(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), "pi-pocket");
 const disabledFile = join(stateDir, "remote-disabled");
 const originFile = join(stateDir, "tailscale-origin");
 
 type ToolMessage = { role: "tool"; id: string; name: string; args: unknown; output?: unknown; state: "running" | "done" | "error" | "unknown" };
-type DisplayMessage = { role: "user" | "assistant"; text: string } | ToolMessage;
+type DisplayMessage = { role: "user" | "assistant"; text: string } | { role: "source"; via: "tailscale" | "local" } | ToolMessage;
 
 function display(message: any): DisplayMessage | undefined {
   if (message?.role !== "user" && message?.role !== "assistant") return;
@@ -30,10 +33,11 @@ export default function (pi: ExtensionAPI) {
   let streaming: DisplayMessage | undefined;
   let waiting: { kind: string; title?: string } | undefined;
   let disabled = false;
-  let queued: string[] = [];
+  let queued: { text: string; via: "tailscale" | "local" }[] = [];
   let queueTimer: ReturnType<typeof setInterval> | undefined;
   let accessKey = randomBytes(24).toString("base64url");
   let remoteOrigin: string | undefined;
+  let disconnectingTailscale = false;
 
   function stopServer() {
     if (queueTimer) clearInterval(queueTimer);
@@ -50,6 +54,10 @@ export default function (pi: ExtensionAPI) {
   function loadHistory(entries: ReturnType<import("@earendil-works/pi-coding-agent").SessionManager["getBranch"]>) {
     messages = [];
     for (const entry of entries) {
+      if (entry.type === "custom" && entry.customType === "pi-pocket-prompt") {
+        const via = (entry.data as { via?: unknown } | undefined)?.via;
+        if (via === "tailscale" || via === "local") messages.push({ role: "source", via });
+      }
       if (entry.type !== "message") continue;
       const message = entry.message;
       const item = display(message);
@@ -67,6 +75,13 @@ export default function (pi: ExtensionAPI) {
     streaming = undefined;
     waiting = undefined;
   }
+
+  pi.registerEntryRenderer("pi-pocket-prompt", (entry, _options, theme) => {
+    const label = (entry.data as { via?: string } | undefined)?.via === "tailscale"
+      ? "↳ Pi Pocket · Tailscale address"
+      : "↳ Pi Pocket · local address";
+    return { render: (width: number) => [theme.fg("dim", label.slice(0, Math.max(0, width)))], invalidate() {} };
+  });
 
   pi.registerCommand("remote", {
     description: "Show address and access key; use /remote share <hostname> for Tailscale",
@@ -164,10 +179,45 @@ export default function (pi: ExtensionAPI) {
           const { text } = JSON.parse(body);
           if (typeof text !== "string" || !text.trim()) throw new Error("Empty prompt");
           if (disabled) { res.writeHead(503).end("Pi Remote disabled"); return; }
-          queued.push(text.trim());
+          queued.push({ text: text.trim(), via: requestOrigin === remoteOrigin ? "tailscale" : "local" });
           res.writeHead(202).end();
         } catch {
           res.writeHead(400).end("Invalid prompt");
+        }
+      } else if (req.method === "POST" && req.url === "/api/disconnect-tailscale") {
+        if (req.headers.origin !== requestOrigin || req.headers["content-type"] !== "application/json") {
+          res.writeHead(403).end();
+          return;
+        }
+        if (!remoteOrigin || disconnectingTailscale) {
+          res.writeHead(409).end("Tailscale access is not configured or is already being disconnected.");
+          return;
+        }
+        disconnectingTailscale = true;
+        let routeRemoved = false;
+        try {
+          const { stdout } = await execFileAsync("tailscale", ["serve", "status", "--json"], { timeout: 10000, maxBuffer: 1024 * 1024 });
+          const config = JSON.parse(stdout);
+          const host = `${new URL(remoteOrigin).hostname}:443`;
+          const handlers = config.Web?.[host]?.Handlers;
+          // Never remove a shared listener or any route other than this package's root proxy.
+          if (Object.keys(config.Web ?? {}).length !== 1 || Object.keys(config.TCP ?? {}).length !== 1 ||
+              Object.keys(config.TCP?.["443"] ?? {}).join() !== "HTTPS" || config.TCP["443"].HTTPS !== true ||
+              !handlers || Object.keys(handlers).join() !== "/" || Object.keys(handlers["/"] ?? {}).join() !== "Proxy" ||
+              handlers["/"].Proxy !== `http://127.0.0.1:${port}` || Object.values(config.AllowFunnel ?? {}).some(Boolean)) {
+            res.writeHead(409).end("Serve configuration does not exclusively match Pi Pocket. Check it on the laptop.");
+            return;
+          }
+          await execFileAsync("tailscale", ["serve", "--https=443", "off"], { timeout: 10000, maxBuffer: 1024 * 1024 });
+          routeRemoved = true;
+          remoteOrigin = undefined;
+          await unlink(originFile).catch((error) => { if (error.code !== "ENOENT") throw error; });
+          res.writeHead(200).end("Tailscale access turned off.");
+        } catch (error) {
+          ctx.ui.notify(`Pi Pocket could not finish disabling Tailscale access: ${error}`, "error");
+          res.writeHead(500).end(routeRemoved ? "Serve is off, but Pi Pocket could not save its settings. Check the laptop." : "Could not turn off Tailscale Serve. Check the laptop.");
+        } finally {
+          disconnectingTailscale = false;
         }
       } else if (req.method === "POST" && (req.url === "/api/stop" || req.url === "/api/stop-all")) {
         if (req.headers.origin !== requestOrigin || req.headers["content-type"] !== "application/json") {
@@ -207,9 +257,12 @@ export default function (pi: ExtensionAPI) {
     if (address && typeof address !== "string") ctx.ui.notify(`Pi Remote: http://127.0.0.1:${address.port}`, "info");
     queueTimer = setInterval(() => {
       if (!disabled && queued.length && ctx.isIdle()) {
-        const text = queued.shift()!;
-        try { pi.sendUserMessage(text); }
-        catch (error) { queued.unshift(text); ctx.ui.notify(`Pi Remote could not send: ${error}`, "error"); }
+        const prompt = queued.shift()!;
+        try {
+          pi.appendEntry("pi-pocket-prompt", { via: prompt.via });
+          messages.push({ role: "source", via: prompt.via });
+          pi.sendUserMessage(prompt.text);
+        } catch (error) { queued.unshift(prompt); ctx.ui.notify(`Pi Remote could not send: ${error}`, "error"); }
       }
     }, 250);
     queueTimer.unref();

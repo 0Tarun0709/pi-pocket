@@ -16,9 +16,9 @@ test('all-stop aborts, discards remote queue and stays disabled until enabled lo
   await symlink(resolve('node_modules'), join(dir, 'node_modules'));
   const { default: extension } = await import(pathToFileURL(join(dir, 'extensions/pocket/index.ts')));
   const events = {}, commands = {};
-  let url, key, aborts = 0, sent = [], idle = false;
+  let url, key, aborts = 0, sent = [], entries = [], renderer, idle = false;
   const ctx = { cwd: dir, sessionManager: { getBranch: () => [] }, isIdle: () => idle, abort: () => aborts++, ui: { notify: message => { if (message.startsWith('Pi Remote: http')) url = message.slice('Pi Remote: '.length); if (message.includes('Access key: ')) key = message.match(/Access key: (\S+)/)[1]; } } };
-  extension({ on: (name, fn) => events[name] = fn, registerCommand: (name, command) => commands[name] = command, sendUserMessage: text => sent.push(text) });
+  extension({ on: (name, fn) => events[name] = fn, registerCommand: (name, command) => commands[name] = command, registerEntryRenderer: (_type, fn) => renderer = fn, appendEntry: (type, data) => entries.push({ type, data }), sendUserMessage: text => sent.push(text) });
   const original = Server.prototype.listen;
   Server.prototype.listen = function (_port, host, callback) { return original.call(this, 0, host, callback); };
   try {
@@ -37,7 +37,7 @@ test('all-stop aborts, discards remote queue and stays disabled until enabled lo
     await commands.remote.handler('share laptop.test.ts.net', ctx);
     const raw = (path, headers, method = 'GET') => new Promise((resolve, reject) => {
       const req = request(url + path, { headers, method }, res => { res.resume(); resolve(res.statusCode); });
-      req.on('error', reject); req.end();
+      req.on('error', reject); req.end(method === 'POST' ? JSON.stringify({ text: 'from phone' }) : undefined);
     });
     const remoteHeaders = { ...headers(), host: 'laptop.test.ts.net' };
     assert.equal(await raw('/api/session', { host: remoteHeaders.host }), 401);
@@ -45,7 +45,18 @@ test('all-stop aborts, discards remote queue and stays disabled until enabled lo
     assert.equal(await raw('/api/session', { ...headers(), host: 'evil.test.ts.net' }), 403);
     assert.equal(await raw('/api/stop', { ...remoteHeaders, origin: 'https://evil.test.ts.net', 'content-type': 'application/json' }, 'POST'), 403);
     assert.equal(await raw('/api/stop', { ...remoteHeaders, 'content-type': 'application/json' }, 'POST'), 403);
-    assert.equal(await raw('/api/prompt', { ...remoteHeaders, origin: 'https://laptop.test.ts.net', 'content-type': 'application/json' }, 'POST'), 400);
+    assert.equal(await raw('/api/prompt', { ...remoteHeaders, origin: 'https://laptop.test.ts.net', 'content-type': 'application/json' }, 'POST'), 202);
+    idle = true;
+    await new Promise(resolve => setTimeout(resolve, 350));
+    assert.deepEqual(sent, ['from phone']);
+    assert.deepEqual(entries, [{ type: 'pi-pocket-prompt', data: { via: 'tailscale' } }]);
+    assert.match(renderer(entries[0], {}, { fg: (_color, text) => text }).render(80)[0], /Pi Pocket · Tailscale address/);
+    assert.equal((await post('/api/prompt', { text: 'from local browser' })).status, 202);
+    await new Promise(resolve => setTimeout(resolve, 350));
+    assert.deepEqual(sent, ['from phone', 'from local browser']);
+    assert.deepEqual(entries[1], { type: 'pi-pocket-prompt', data: { via: 'local' } });
+    sent = [];
+    idle = false;
     assert.equal((await post('/api/prompt', { text: 'queued' })).status, 202);
     assert.equal((await (await get('/api/session')).json()).queued, 1);
     assert.equal((await post('/api/stop')).status, 200);
@@ -55,6 +66,7 @@ test('all-stop aborts, discards remote queue and stays disabled until enabled lo
     idle = true;
     await new Promise(resolve => setTimeout(resolve, 350));
     assert.deepEqual(sent, []);
+    assert.equal(entries.length, 2);
     await assert.rejects(fetch(url));
     await events.session_shutdown();
     await events.session_start({}, ctx);
