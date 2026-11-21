@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { Pairing } from '../extensions/pocket/auth.ts';
 
 test('pairing codes are single-use and expire; browser credentials persist and can be revoked', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'pi-pocket-auth-'));
+  const dir = await mkdtemp(join(tmpdir(), 'pockpi-auth-'));
   const now = Date.now;
   try {
     let time = now();

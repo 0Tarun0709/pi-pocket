@@ -9,6 +9,13 @@ Access your running [Pi](https://github.com/earendil-works/pi) session from a br
 
 See the [changelog](CHANGELOG.md) for release history.
 
+## Why I built this
+
+I wanted a way to use the agent running on my laptop from my phone. When I'm
+away and think of something it could fix or work on, I don't want to wait until
+I get back to start it. PockPi lets me send a prompt, check on the progress, and
+pick up where I left off when I return.
+
 ## Install
 
 Requires Pi and Node.js 24 or newer.
@@ -19,9 +26,9 @@ pi install npm:pockpi
 
 Alternatively, install from Git with `pi install git:github.com/0Tarun0709/pockpi`.
 
-If upgrading from Pi Pocket or Pi Aevin, remove the old package first with
-`pi remove npm:@0tarun0709/pi-pocket` or `pi remove npm:pi-aevin` to avoid a
-port conflict. Existing paired browsers and emergency-stop settings are retained.
+If upgrading from an earlier package, use `pi list` and remove the old package
+with `pi remove <source>` to avoid a port conflict. Existing paired browsers and
+emergency-stop settings are retained.
 
 Restart Pi or run `/reload`. PockPi does not start a server until you request access.
 
@@ -53,7 +60,7 @@ Session switching and answering Pi's interactive dialogs from the browser are no
 - Tailscale access uses the separate, authenticated listener on port `18789`. Only `/remote pair` enables it. Keep pairing codes and paired devices private.
 - Both ports are reserved while PockPi is running; an access method not enabled returns HTTP 503. Only one Pi session can use them at a time.
 - If HTTPS port 443 is already used by another service or Funnel is configured, PockPi refuses to change Serve. Check `tailscale serve status` on the laptop and avoid changing Serve settings concurrently while pairing.
-- Browser credential hashes and the emergency lock are stored under `~/.pi/agent/pi-pocket/`, or `PI_CODING_AGENT_DIR` if set. Device labels are browser-reported, not verified identities.
+- Browser credential hashes and the emergency lock are stored in Pi's agent data directory (`~/.pi/agent/`, or `PI_CODING_AGENT_DIR` if set). Device labels are browser-reported, not verified identities.
 
 ## Development
 

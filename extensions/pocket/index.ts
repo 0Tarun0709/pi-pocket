@@ -16,7 +16,7 @@ const QRCode: typeof import("qrcode") = require("qrcode");
 const execFileAsync = promisify(execFile);
 const port = 18789;
 const localPort = 18790;
-// Preserve Pi Pocket's existing security state and emergency lock across the rename.
+// Preserve existing security state and the emergency lock across renames.
 const stateDir = join(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), "pi-pocket");
 const disabledFile = join(stateDir, "remote-disabled");
 const originFile = join(stateDir, "tailscale-origin");

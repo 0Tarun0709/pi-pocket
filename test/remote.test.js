@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 test('renders streamed markdown safely and keeps user text literal', async () => {
-  const state = await mkdtemp(join(tmpdir(), 'pi-pocket-state-'));
+  const state = await mkdtemp(join(tmpdir(), 'pockpi-state-'));
   process.env.PI_CODING_AGENT_DIR = state;
   const { default: extension } = await import('../extensions/pocket/index.ts');
   const events = {}, commands = {};

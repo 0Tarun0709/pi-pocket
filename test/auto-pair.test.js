@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { Server, request } from 'node:http';
 
 test('/remote pair configures private Serve before displaying a QR and never overwrites another route', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'pi-pocket-auto-pair-'));
+  const dir = await mkdtemp(join(tmpdir(), 'pockpi-auto-pair-'));
   const bin = join(dir, 'bin');
   await mkdir(bin);
   const configFile = join(dir, 'serve.json');

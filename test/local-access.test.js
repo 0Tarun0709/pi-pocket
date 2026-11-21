@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { Server, createServer, request } from 'node:http';
 
 test('local browser needs no pairing, while the existing Tailscale port remains protected', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'pi-pocket-local-'));
+  const dir = await mkdtemp(join(tmpdir(), 'pockpi-local-'));
   process.env.PI_CODING_AGENT_DIR = dir;
   const { default: extension } = await import('../extensions/pocket/index.ts');
   const events = {}, commands = {};
@@ -66,7 +66,7 @@ test('local browser needs no pairing, while the existing Tailscale port remains 
 });
 
 test('another session cannot bypass an all-stop made after it started', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'pi-pocket-multi-'));
+  const dir = await mkdtemp(join(tmpdir(), 'pockpi-multi-'));
   const bin = join(dir, 'bin'), called = join(dir, 'called');
   await mkdir(bin);
   await writeFile(join(bin, 'tailscale'), `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(called)}, 'called'); process.exit(1);\n`, { mode: 0o755 });
@@ -113,7 +113,7 @@ test('another session cannot bypass an all-stop made after it started', async ()
 });
 
 test('a local port conflict closes the reserved remote listener', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'pi-pocket-conflict-'));
+  const dir = await mkdtemp(join(tmpdir(), 'pockpi-conflict-'));
   process.env.PI_CODING_AGENT_DIR = dir;
   const { default: extension } = await import('../extensions/pocket/index.ts?port-conflict');
   const events = {}, commands = {}, notices = [];

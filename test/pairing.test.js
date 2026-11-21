@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Server, request } from 'node:http';
 test('pairing endpoint requires the right origin, sets a secure cookie and supports revocation', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'pi-pocket-pair-http-'));
+  const dir = await mkdtemp(join(tmpdir(), 'pockpi-pair-http-'));
   process.env.PI_CODING_AGENT_DIR = dir;
   const { default: extension } = await import('../extensions/pocket/index.ts');
   const events = {}, commands = {};

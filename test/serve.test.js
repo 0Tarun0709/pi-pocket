@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { Server, request } from 'node:http';
 
 test('disconnects only an exclusive PockPi Serve route and leaves Pi running', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'pi-pocket-serve-'));
+  const dir = await mkdtemp(join(tmpdir(), 'pockpi-serve-'));
   const bin = join(dir, 'bin');
   await mkdir(bin);
   const statusFile = join(dir, 'status.json');
