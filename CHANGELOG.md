@@ -6,10 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-21
+
 ### Added
 
-- GitHub Actions workflow for publishing future releases to npm with trusted
-  publishing.
+- GitHub Actions workflow for staging npm releases with trusted publishing and
+  maintainer approval.
 
 ## [0.1.1] - 2026-11-21
 
@@ -32,6 +34,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   emergency stop and disable Pi Pocket.
 - Installable Pi package, setup and security documentation, and MIT license.
 
-[Unreleased]: https://github.com/0Tarun0709/pi-pocket/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/0Tarun0709/pi-pocket/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/0Tarun0709/pi-pocket/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/0Tarun0709/pi-pocket/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/0Tarun0709/pi-pocket/releases/tag/v0.1.0
