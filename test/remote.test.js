@@ -2,9 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { Server } from 'node:http';
-import extension from '../.pi/extensions/remote.ts';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 test('renders streamed markdown safely and keeps user text literal', async () => {
+  const state = await mkdtemp(join(tmpdir(), 'pi-pocket-state-'));
+  process.env.PI_CODING_AGENT_DIR = state;
+  const { default: extension } = await import('../extensions/pocket/index.ts');
   const events = {};
   let url, busy = false, aborts = 0;
   extension({ registerCommand() {}, on(name, handler) { events[name] = handler; }, sendUserMessage() {} });
@@ -12,6 +17,7 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
   const listen = Server.prototype.listen;
   Server.prototype.listen = function (_port, host, callback) { return listen.call(this, 0, host, callback); };
   try { await events.session_start({}, {
+    cwd: state,
     sessionManager: { getBranch: () => [
       { type: 'message', message: { role: 'user', content: '**literal**' } },
       { type: 'message', message: { role: 'assistant', content: [ { type: 'text', text: '# Heading\n\n**bold**\n\n| A | B |\n| - | - |\n| 1 | 2 |\n\n```js\nhello()\n```\n\n<img src=x onerror="alert(1)"><script>alert(1)</script> [bad](javascript:alert(1))' }, { type: 'toolCall', id: 'old', name: 'read', arguments: { path: 'x' } } ] } },
@@ -81,5 +87,6 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
   } finally {
     dom?.window.close();
     await events.session_shutdown();
+    await rm(state, { recursive: true, force: true });
   }
 });

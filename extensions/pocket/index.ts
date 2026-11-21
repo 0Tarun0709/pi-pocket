@@ -1,11 +1,16 @@
 import { createServer, type Server } from "node:http";
-import { readFile, writeFile, unlink } from "node:fs/promises";
+import { readFile, writeFile, unlink, mkdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const page = fileURLToPath(new URL("../../web/index.html", import.meta.url));
+const require = createRequire(import.meta.url);
 const port = 18789;
-const disabledFile = fileURLToPath(new URL("../remote-disabled", import.meta.url));
+const stateDir = join(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), "pi-pocket");
+const disabledFile = join(stateDir, "remote-disabled");
 
 type ToolMessage = { role: "tool"; id: string; name: string; args: unknown; output?: unknown; state: "running" | "done" | "error" | "unknown" };
 type DisplayMessage = { role: "user" | "assistant"; text: string } | ToolMessage;
@@ -38,7 +43,7 @@ export default function (pi: ExtensionAPI) {
     return messages.find((item): item is ToolMessage => item.role === "tool" && item.id === id);
   }
 
-  function loadHistory(entries: ReturnType<import("@mariozechner/pi-coding-agent").SessionManager["getBranch"]>) {
+  function loadHistory(entries: ReturnType<import("@earendil-works/pi-coding-agent").SessionManager["getBranch"]>) {
     messages = [];
     for (const entry of entries) {
       if (entry.type !== "message") continue;
@@ -66,6 +71,7 @@ export default function (pi: ExtensionAPI) {
         if (server) { ctx.ui.notify("Pi Remote is already running", "info"); return; }
         try {
           await startServer(ctx);
+          await unlink(join(ctx.cwd, ".pi", "remote-disabled")).catch((error) => { if (error.code !== "ENOENT") throw error; });
           await unlink(disabledFile).catch((error) => { if (error.code !== "ENOENT") throw error; });
           disabled = false;
         } catch (error) {
@@ -79,12 +85,12 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  async function startServer(ctx: import("@mariozechner/pi-coding-agent").ExtensionContext) {
+  async function startServer(ctx: import("@earendil-works/pi-coding-agent").ExtensionContext) {
     const [html, marked, dompurify, highlight] = await Promise.all([
       readFile(page),
-      readFile(new URL("../../node_modules/marked/lib/marked.umd.js", import.meta.url)),
-      readFile(new URL("../../node_modules/dompurify/dist/purify.min.js", import.meta.url)),
-      readFile(new URL("../../node_modules/@highlightjs/cdn-assets/highlight.min.js", import.meta.url)),
+      readFile(join(dirname(require.resolve("marked")), "marked.umd.js")),
+      readFile(join(dirname(require.resolve("dompurify")), "purify.min.js")),
+      readFile(require.resolve("@highlightjs/cdn-assets/highlight.min.js")),
     ]);
     server = createServer(async (req, res) => {
       const host = req.headers.host;
@@ -141,7 +147,8 @@ export default function (pi: ExtensionAPI) {
           res.once("finish", closeOnce);
           res.once("close", closeOnce);
           try {
-            await writeFile(disabledFile, "Pi Remote disabled. Use /remote enable to restart.\n");
+            await mkdir(stateDir, { recursive: true, mode: 0o700 });
+            await writeFile(disabledFile, "Pi Remote disabled. Use /remote enable to restart.\n", { mode: 0o600 });
             res.writeHead(200).end();
           } catch (error) {
             ctx.ui.notify(`Pi Remote disabled, but could not persist the lock: ${error}`, "error");
@@ -175,6 +182,14 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     loadHistory(ctx.sessionManager.getBranch());
     try {
+      // Preserve an all-stop made by the older project-local extension.
+      try {
+        await readFile(join(ctx.cwd, ".pi", "remote-disabled"));
+        await mkdir(stateDir, { recursive: true, mode: 0o700 });
+        await writeFile(disabledFile, "Pi Remote disabled. Use /remote enable to restart.\n", { mode: 0o600 });
+      } catch (error: any) {
+        if (error.code !== "ENOENT") throw error;
+      }
       await readFile(disabledFile);
       disabled = true;
       ctx.ui.notify("Pi Remote disabled. Use /remote enable to restart.", "info");
