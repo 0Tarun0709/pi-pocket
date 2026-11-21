@@ -58,6 +58,8 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
       await new Promise(resolve => setTimeout(resolve, 20));
     }
     const document = dom.window.document;
+    assert.equal(document.title, 'Pi Pocket');
+    assert.equal(document.querySelector('.brand h1').textContent, 'Pi Pocket');
     const sessions = document.querySelector('.sessions');
     sessions.querySelector('summary').click();
     assert.equal(sessions.open, true);
