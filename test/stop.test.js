@@ -20,7 +20,7 @@ test('all-stop aborts, discards remote queue and stays disabled until enabled lo
   const { default: extension } = await import(pathToFileURL(join(dir, 'extensions/pocket/index.ts')));
   const events = {}, commands = {};
   let url, code, aborts = 0, sent = [], entries = [], renderer, idle = false;
-  const ctx = { cwd: dir, sessionManager: { getBranch: () => [] }, isIdle: () => idle, abort: () => aborts++, ui: { notify: message => { if (message.startsWith('Pi Aevin: http')) url = message.slice('Pi Aevin: '.length); }, custom: async factory => { code = factory({}, { fg: (_color, text) => text }, {}, () => {}).render(200).find(line => line.startsWith('Code: ')).slice(6); } } };
+  const ctx = { cwd: dir, sessionManager: { getBranch: () => [] }, isIdle: () => idle, abort: () => aborts++, ui: { notify: message => { if (message.startsWith('PockPi: http')) url = message.slice('PockPi: '.length); }, custom: async factory => { code = factory({}, { fg: (_color, text) => text }, {}, () => {}).render(200).find(line => line.startsWith('Code: ')).slice(6); } } };
   extension({ on: (name, fn) => events[name] = fn, registerCommand: (name, command) => commands[name] = command, registerEntryRenderer: (_type, fn) => renderer = fn, appendEntry: (type, data) => entries.push({ type, data }), sendUserMessage: text => sent.push(text) });
   const original = Server.prototype.listen;
   Server.prototype.listen = function (_port, host, callback) { return original.call(this, 0, host, callback); };
@@ -56,7 +56,7 @@ test('all-stop aborts, discards remote queue and stays disabled until enabled lo
     await new Promise(resolve => setTimeout(resolve, 350));
     assert.deepEqual(sent, ['from phone']);
     assert.deepEqual(entries, [{ type: 'pi-pocket-prompt', data: { via: 'tailscale' } }]);
-    assert.match(renderer(entries[0], {}, { fg: (_color, text) => text }).render(80)[0], /Pi Aevin · Tailscale address/);
+    assert.match(renderer(entries[0], {}, { fg: (_color, text) => text }).render(80)[0], /PockPi · Tailscale address/);
     assert.equal((await post('/api/prompt', { text: 'from local browser' })).status, 202);
     await new Promise(resolve => setTimeout(resolve, 350));
     assert.deepEqual(sent, ['from phone', 'from local browser']);

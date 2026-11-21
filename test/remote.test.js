@@ -14,7 +14,7 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
   const events = {}, commands = {};
   let url, code, qrLines, busy = false, aborts = 0;
   extension({ registerCommand(name, command) { commands[name] = command; }, registerEntryRenderer() {}, on(name, handler) { events[name] = handler; }, sendUserMessage() {} });
-  // Tests use an ephemeral port so an active Pi Aevin session can keep its fixed port.
+  // Tests use an ephemeral port so an active PockPi session can keep its fixed port.
   const listen = Server.prototype.listen;
   Server.prototype.listen = function (_port, host, callback) { return listen.call(this, 0, host, callback); };
   const ctx = {
@@ -28,7 +28,7 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
     isIdle: () => !busy,
     abort: () => { aborts++; },
     ui: { notify(message) {
-      if (message.startsWith('Pi Aevin: http')) url = message.replace('Pi Aevin: ', '');
+      if (message.startsWith('PockPi: http')) url = message.replace('PockPi: ', '');
     }, custom: async factory => { const lines = factory({}, { fg: (_color, text) => text }, {}, () => {}).render(200); code = lines.find(line => line.startsWith('Code: ')).slice(6); qrLines = lines.filter(line => line.startsWith('\x1b[30;47m')).map(line => line.slice(8, -4)); } },
   };
   await events.session_start({}, ctx);
@@ -58,8 +58,8 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
       await new Promise(resolve => setTimeout(resolve, 20));
     }
     const document = dom.window.document;
-    assert.equal(document.title, 'Pi Aevin');
-    assert.equal(document.querySelector('.brand h1').textContent, 'Pi Aevin');
+    assert.equal(document.title, 'PockPi');
+    assert.equal(document.querySelector('.brand h1').textContent, 'PockPi');
     const sessions = document.querySelector('.sessions');
     sessions.querySelector('summary').click();
     assert.equal(sessions.open, true);
@@ -71,7 +71,7 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
     assert.equal(document.documentElement.dataset.theme, 'light');
     assert.match(document.cookie, /pi-remote-theme=light/);
     assert.match(document.querySelector('#browser-label').textContent, /^This browser: .+ · [a-f0-9]{16}$/);
-    assert.equal(document.querySelector('.source-label').textContent, 'Pi Aevin · Tailscale address');
+    assert.equal(document.querySelector('.source-label').textContent, 'PockPi · Tailscale address');
     assert.equal(document.querySelector('.message.user .bubble').textContent, '**literal**');
     assert.equal(document.querySelector('.markdown h1').textContent, 'Heading');
     assert.equal(document.querySelector('.markdown strong').textContent, 'bold');
