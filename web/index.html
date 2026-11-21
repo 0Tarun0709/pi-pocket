@@ -87,7 +87,7 @@
     .sessions summary::-webkit-details-marker { display: none; }
     .sessions summary:focus-visible { outline: 2px solid #c5e4a4; outline-offset: 2px; }
     .sessions-panel { position: absolute; z-index: 2; right: 0; top: calc(100% + 8px); width: 240px; padding: 16px; background: #252c25; border: 1px solid #465046; border-radius: 12px; box-shadow: 0 8px 24px #0004; font-size: 13px; }
-    .sessions-panel p { margin-top: 8px; color: #a8b4a5; line-height: 1.5; }
+    .sessions-panel p { margin-top: 8px; color: #a8b4a5; line-height: 1.5; overflow-wrap: anywhere; }
     .sessions-panel button { display: block; width: 100%; height: auto; margin-top: 10px; padding: 9px; border: 1px solid #657361; border-radius: 8px; background: transparent; color: inherit; font-size: 12px; text-align: left; }
     html .sessions-panel button.danger { display: flex; align-items: center; gap: 8px; background: #c83232; color: #fff; border-color: #c83232; font-weight: 700; }
     html .sessions-panel button.danger:hover { background: #a92323; border-color: #a92323; }
@@ -123,7 +123,7 @@
         <span class="badge" id="status">Connecting</span>
         <details class="sessions">
           <summary>Sessions</summary>
-          <div class="sessions-panel"><strong>Session actions</strong><button type="button" id="disconnect-tailscale">Turn off Tailscale access</button><button type="button" class="danger" id="stop-all"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>Stop all &amp; disconnect</button><p>Session switching is not connected yet.</p></div>
+          <div class="sessions-panel"><strong>Session actions</strong><p id="browser-label">This browser: checking…</p><button type="button" id="disconnect-tailscale">Turn off Tailscale access</button><button type="button" class="danger" id="stop-all"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>Stop all &amp; disconnect</button><p>Session switching is not connected yet.</p></div>
         </details>
         <select id="theme" aria-label="Choose color theme">
           <option value="graphite">Graphite</option>
@@ -297,12 +297,14 @@
       if (stoppedAll) return;
       try {
         const response = await fetch('/api/session', { cache: 'no-store' });
+        if (response.status === 401) { location.replace('/pair'); return; }
         if (!response.ok) throw new Error('Disconnected');
         const session = await response.json();
         busy = session.busy;
         updateSendButton();
         status.textContent = session.waiting ? 'Waiting for input' : session.busy ? 'Working' : 'Connected';
         status.dataset.working = String(session.busy && !session.waiting);
+        if (session.browser) document.querySelector('#browser-label').textContent = `This browser: ${session.browser.label} · ${session.browser.id}`;
         document.querySelector('.footnote').textContent = session.queued ? `${session.queued} web prompt${session.queued === 1 ? '' : 's'} queued.` : 'Use the stop button to interrupt Pi while it is working.';
         notice.hidden = !session.waiting && !actionNotice;
         if (session.waiting) notice.textContent = `Pi is waiting for ${session.waiting.title || session.waiting.kind}. Answer it in the laptop terminal; remote answers are not supported yet.`;

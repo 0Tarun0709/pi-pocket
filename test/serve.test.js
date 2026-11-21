@@ -25,11 +25,10 @@ else process.exit(2);
   process.env.PI_CODING_AGENT_DIR = join(dir, 'state');
   const { default: extension } = await import('../extensions/pocket/index.ts');
   const events = {}, commands = {};
-  let url, key, aborts = 0;
+  let url, code, aborts = 0;
   const ctx = { cwd: dir, sessionManager: { getBranch: () => [] }, isIdle: () => true, abort: () => aborts++, ui: { notify(message) {
     if (message.startsWith('Pi Remote: http')) url = message.slice('Pi Remote: '.length);
-    if (message.includes('Access key: ')) key = message.match(/Access key: (\S+)/)[1];
-  } } };
+  }, custom: async factory => { code = factory({}, { fg: (_color, text) => text }, {}, () => {}).render(200).find(line => line.startsWith('Code: ')).slice(6); } } };
   extension({ on: (name, handler) => events[name] = handler, registerCommand: (name, command) => commands[name] = command, registerEntryRenderer() {}, appendEntry() {}, sendUserMessage() {} });
   const listen = Server.prototype.listen;
   Server.prototype.listen = function (_port, host, callback) { return listen.call(this, 0, host, callback); };
@@ -37,14 +36,15 @@ else process.exit(2);
     await events.session_start({}, ctx);
   } finally { Server.prototype.listen = listen; }
   try {
+    await commands.remote.handler('pair', ctx);
+    const paired = await fetch(url + '/api/pair', { method: 'POST', headers: { origin: url, 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
+    const cookie = paired.headers.get('set-cookie').split(';')[0];
     await commands.remote.handler('share laptop.test.ts.net', ctx);
-    await commands.remote.handler('', ctx);
-    const authorization = 'Basic ' + Buffer.from(`pocket:${key}`).toString('base64');
-    const post = (headers = {}) => fetch(url + '/api/disconnect-tailscale', { method: 'POST', headers: { authorization, origin: url, 'content-type': 'application/json', ...headers } });
+    const post = (headers = {}) => fetch(url + '/api/disconnect-tailscale', { method: 'POST', headers: { cookie, origin: url, 'content-type': 'application/json', ...headers } });
     const config = { TCP: { '443': { HTTPS: true } }, Web: { 'laptop.test.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:18789' } } } } };
     await writeFile(statusFile, JSON.stringify(config));
     assert.equal((await post({ origin: 'https://evil.example' })).status, 403);
-    assert.equal((await post({ authorization: 'Basic d3Jvbmc=' })).status, 401);
+    assert.equal((await post({ cookie: 'pi-pocket-local=wrong' })).status, 401);
     config.Web['laptop.test.ts.net:443'].Handlers['/other'] = { Proxy: 'http://127.0.0.1:3000' };
     await writeFile(statusFile, JSON.stringify(config));
     assert.equal((await post()).status, 409);
@@ -63,9 +63,9 @@ else process.exit(2);
     delete process.env.FAKE_FAIL;
     assert.equal((await post()).status, 200);
     assert.equal(aborts, 0);
-    assert.equal((await fetch(url + '/api/session', { headers: { authorization } })).status, 200);
+    assert.equal((await fetch(url + '/api/session', { headers: { cookie } })).status, 200);
     const remoteStatus = await new Promise((resolve, reject) => {
-      const req = request(url + '/api/session', { headers: { authorization, host: 'laptop.test.ts.net' } }, res => { res.resume(); resolve(res.statusCode); });
+      const req = request(url + '/api/session', { headers: { cookie, host: 'laptop.test.ts.net' } }, res => { res.resume(); resolve(res.statusCode); });
       req.on('error', reject); req.end();
     });
     assert.equal(remoteStatus, 403);

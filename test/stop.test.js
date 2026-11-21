@@ -12,12 +12,14 @@ test('all-stop aborts, discards remote queue and stays disabled until enabled lo
   process.env.PI_CODING_AGENT_DIR = join(dir, 'state');
   await mkdir(join(dir, 'web'));
   await copyFile('extensions/pocket/index.ts', join(dir, 'extensions/pocket/index.ts'));
+  await copyFile('extensions/pocket/auth.ts', join(dir, 'extensions/pocket/auth.ts'));
   await copyFile('web/index.html', join(dir, 'web/index.html'));
+  await copyFile('web/pair.html', join(dir, 'web/pair.html'));
   await symlink(resolve('node_modules'), join(dir, 'node_modules'));
   const { default: extension } = await import(pathToFileURL(join(dir, 'extensions/pocket/index.ts')));
   const events = {}, commands = {};
-  let url, key, aborts = 0, sent = [], entries = [], renderer, idle = false;
-  const ctx = { cwd: dir, sessionManager: { getBranch: () => [] }, isIdle: () => idle, abort: () => aborts++, ui: { notify: message => { if (message.startsWith('Pi Remote: http')) url = message.slice('Pi Remote: '.length); if (message.includes('Access key: ')) key = message.match(/Access key: (\S+)/)[1]; } } };
+  let url, code, aborts = 0, sent = [], entries = [], renderer, idle = false;
+  const ctx = { cwd: dir, sessionManager: { getBranch: () => [] }, isIdle: () => idle, abort: () => aborts++, ui: { notify: message => { if (message.startsWith('Pi Remote: http')) url = message.slice('Pi Remote: '.length); }, custom: async factory => { code = factory({}, { fg: (_color, text) => text }, {}, () => {}).render(200).find(line => line.startsWith('Code: ')).slice(6); } } };
   extension({ on: (name, fn) => events[name] = fn, registerCommand: (name, command) => commands[name] = command, registerEntryRenderer: (_type, fn) => renderer = fn, appendEntry: (type, data) => entries.push({ type, data }), sendUserMessage: text => sent.push(text) });
   const original = Server.prototype.listen;
   Server.prototype.listen = function (_port, host, callback) { return original.call(this, 0, host, callback); };
@@ -28,18 +30,21 @@ test('all-stop aborts, discards remote queue and stays disabled until enabled lo
     assert.equal(url, undefined);
     assert.match(await readFile(join(dir, 'state/pi-pocket/remote-disabled'), 'utf8'), /disabled/);
     await commands.remote.handler('enable', ctx);
-    await commands.remote.handler('', ctx);
-    const headers = () => ({ authorization: 'Basic ' + Buffer.from(`pocket:${key}`).toString('base64') });
+    await commands.remote.handler('pair', ctx);
+    const paired = await fetch(url + '/api/pair', { method: 'POST', headers: { origin: url, 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
+    assert.equal(paired.status, 200);
+    const cookie = paired.headers.get('set-cookie').split(';')[0];
+    const headers = () => ({ cookie });
     const get = path => fetch(url + path, { headers: headers() });
     const post = (path, body = {}) => fetch(url + path, { method: 'POST', headers: { ...headers(), origin: url, 'content-type': 'application/json' }, body: JSON.stringify(body) });
     assert.equal((await fetch(url + '/api/session')).status, 401);
-    assert.equal((await fetch(url, { headers: { authorization: 'Basic ' + Buffer.from('pocket:wrong').toString('base64') } })).status, 401);
+    assert.equal((await fetch(url + '/api/session', { headers: { cookie: 'pi-pocket-local=wrong' } })).status, 401);
     await commands.remote.handler('share laptop.test.ts.net', ctx);
     const raw = (path, headers, method = 'GET') => new Promise((resolve, reject) => {
       const req = request(url + path, { headers, method }, res => { res.resume(); resolve(res.statusCode); });
       req.on('error', reject); req.end(method === 'POST' ? JSON.stringify({ text: 'from phone' }) : undefined);
     });
-    const remoteHeaders = { ...headers(), host: 'laptop.test.ts.net' };
+    const remoteHeaders = { cookie: cookie.replace('pi-pocket-local', '__Host-pi-pocket'), host: 'laptop.test.ts.net' };
     assert.equal(await raw('/api/session', { host: remoteHeaders.host }), 401);
     assert.equal(await raw('/api/session', remoteHeaders), 200);
     assert.equal(await raw('/api/session', { ...headers(), host: 'evil.test.ts.net' }), 403);
@@ -71,12 +76,8 @@ test('all-stop aborts, discards remote queue and stays disabled until enabled lo
     await events.session_shutdown();
     await events.session_start({}, ctx);
     await assert.rejects(fetch(url));
-    const oldKey = key;
     await commands.remote.handler('enable', ctx);
-    await commands.remote.handler('', ctx);
-    assert.notEqual(key, oldKey);
-    assert.equal(await raw('/api/session', { ...remoteHeaders, authorization: 'Basic ' + Buffer.from(`pocket:${oldKey}`).toString('base64') }), 401);
-    assert.equal(await raw('/api/session', { ...headers(), host: 'laptop.test.ts.net' }), 200);
+    assert.equal(await raw('/api/session', remoteHeaders), 200);
     assert.equal((await get('')).status, 200);
     assert.equal((await (await get('/api/session')).json()).queued, 0);
   } finally {

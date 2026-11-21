@@ -1,5 +1,4 @@
 import { createServer, type Server } from "node:http";
-import { randomBytes, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile, writeFile, unlink, mkdir } from "node:fs/promises";
@@ -8,9 +7,11 @@ import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Pairing } from "./auth.ts";
 
 const page = fileURLToPath(new URL("../../web/index.html", import.meta.url));
 const require = createRequire(import.meta.url);
+const QRCode: typeof import("qrcode") = require("qrcode");
 const execFileAsync = promisify(execFile);
 const port = 18789;
 const stateDir = join(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), "pi-pocket");
@@ -35,7 +36,7 @@ export default function (pi: ExtensionAPI) {
   let disabled = false;
   let queued: { text: string; via: "tailscale" | "local" }[] = [];
   let queueTimer: ReturnType<typeof setInterval> | undefined;
-  let accessKey = randomBytes(24).toString("base64url");
+  let pairing = new Pairing(stateDir);
   let remoteOrigin: string | undefined;
   let disconnectingTailscale = false;
 
@@ -84,9 +85,60 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("remote", {
-    description: "Show address and access key; use /remote share <hostname> for Tailscale",
+    description: "Show address; use /remote pair or /remote devices to manage browser access",
     handler: async (args, ctx) => {
       const input = args.trim();
+      if (input === "pair") {
+        const address = server?.address();
+        if (!address || typeof address === "string") { ctx.ui.notify("Pi Pocket is not running.", "error"); return; }
+        const origin = remoteOrigin || `http://127.0.0.1:${address.port}`;
+        const code = pairing.issue();
+        const qr = QRCode.create(`${origin}/pair#pair=${code}`, { errorCorrectionLevel: "L" });
+        const size = qr.modules.size + 8;
+        const black = (y: number, x: number) => y >= 4 && x >= 4 && y < size - 4 && x < size - 4 && qr.modules.get(y - 4, x - 4);
+        const rows: string[] = [];
+        for (let y = 0; y < size; y += 2) {
+          let row = "";
+          for (let x = 0; x < size; x++) row += black(y, x) ? (black(y + 1, x) ? "█" : "▀") : (black(y + 1, x) ? "▄" : " ");
+          rows.push(`\x1b[30;47m${row}\x1b[0m`);
+        }
+        let showCode = false;
+        await ctx.ui.custom<void>((tui, theme, keys, done) => ({
+          render(width) {
+            const height = tui.terminal?.rows ?? Infinity;
+            const codeWidth = Math.max(1, width - 6);
+            const codeLines: string[] = [];
+            for (let i = 0; i < code.length; i += codeWidth) codeLines.push(`${i ? "      " : "Code: "}${code.slice(i, i + codeWidth)}`.slice(0, width));
+            const fits = width >= size && height >= rows.length + 1;
+            if (fits && !showCode) {
+              const title = remoteOrigin ? "Scan QR · c: code · Esc: close · expires in 2 min" : "Local pairing · c: code · Esc: close · expires in 2 min";
+              return [theme.fg("accent", title.slice(0, width)), ...rows, ...(height >= rows.length + codeLines.length + 3 ? [...codeLines, "Open the Pi Pocket address to enter the code.".slice(0, width), "Enter or Esc to close".slice(0, width)] : [])];
+            }
+            return [theme.fg("accent", "Pairing code · expires in 2 minutes".slice(0, width)), ...codeLines, "Open the Pi Pocket address to enter this code.".slice(0, width), (fits ? "c: QR · Esc: close" : "Enlarge terminal for QR · Esc: close").slice(0, width)];
+          },
+          handleInput(data) {
+            if (data === "c") { showCode = !showCode; tui.requestRender(); }
+            else if (keys.matches(data, "tui.select.confirm") || keys.matches(data, "tui.select.cancel")) done();
+          },
+          invalidate() {},
+        }), { overlay: true, overlayOptions: { width: "100%", maxHeight: "100%" } });
+        return;
+      }
+      if (input === "devices") {
+        const owner = server;
+        if (!owner?.listening) { ctx.ui.notify("Pi Pocket is not running in this session. Manage browsers in the session that owns the server.", "error"); return; }
+        const browsers = pairing.list();
+        if (!browsers.length) { ctx.ui.notify("No paired browsers.", "info"); return; }
+        const options = browsers.map((browser) => `${browser.label} · ${browser.id} · paired ${browser.created.slice(0, 10)}`);
+        const selected = await ctx.ui.select("Select a browser to revoke", options);
+        const index = selected ? options.indexOf(selected) : -1;
+        if (index >= 0 && await ctx.ui.confirm("Revoke browser?", `This will disconnect ${options[index]}.`)) {
+          if (server !== owner || !owner.listening) { ctx.ui.notify("Pi Pocket stopped; browser was not revoked.", "error"); return; }
+          pairing.revoke(browsers[index].id);
+          ctx.ui.notify("Browser revoked.", "info");
+        }
+        return;
+      }
       if (input === "unshare") {
         try {
           await unlink(originFile).catch((error) => { if (error.code !== "ENOENT") throw error; });
@@ -105,7 +157,7 @@ export default function (pi: ExtensionAPI) {
           await mkdir(stateDir, { recursive: true, mode: 0o700 });
           await writeFile(originFile, `https://${hostname}`, { mode: 0o600 });
           remoteOrigin = `https://${hostname}`;
-          ctx.ui.notify(`Pi Pocket accepts ${remoteOrigin}. Run /remote for the access key.`, "info");
+          ctx.ui.notify(`Pi Pocket accepts ${remoteOrigin}. Run /remote pair to pair a browser.`, "info");
         } catch (error) { ctx.ui.notify(`Pi Pocket could not save its origin: ${error}`, "error"); }
         return;
       }
@@ -123,18 +175,19 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       const address = server?.address();
-      ctx.ui.notify(address && typeof address !== "string" ? `Pi Pocket: http://127.0.0.1:${address.port}\nUsername: pocket\nAccess key: ${accessKey}${remoteOrigin ? `\nTailscale: ${remoteOrigin}` : ""}` : "Pi Remote is not running", "info");
+      ctx.ui.notify(address && typeof address !== "string" ? `Pi Pocket: http://127.0.0.1:${address.port}${remoteOrigin ? `\nTailscale: ${remoteOrigin}` : ""}\nUse /remote pair to pair a browser; /remote devices to revoke one.` : "Pi Remote is not running", "info");
     },
   });
 
   async function startServer(ctx: import("@earendil-works/pi-coding-agent").ExtensionContext) {
-    const [html, marked, dompurify, highlight] = await Promise.all([
+    pairing = new Pairing(stateDir);
+    const [html, pairPage, marked, dompurify, highlight] = await Promise.all([
       readFile(page),
+      readFile(new URL("../../web/pair.html", import.meta.url)),
       readFile(join(dirname(require.resolve("marked")), "marked.umd.js")),
       readFile(join(dirname(require.resolve("dompurify")), "purify.min.js")),
       readFile(require.resolve("@highlightjs/cdn-assets/highlight.min.js")),
     ]);
-    accessKey = randomBytes(24).toString("base64url");
     server = createServer(async (req, res) => {
       const host = req.headers.host;
       const address = server?.address();
@@ -147,15 +200,29 @@ export default function (pi: ExtensionAPI) {
       }
       if (disabled) { res.writeHead(503).end("Pi Remote disabled"); return; }
       res.setHeader("Cache-Control", "no-store");
-      const expectedAuth = Buffer.from(`pocket:${accessKey}`);
-      const auth = req.headers.authorization?.match(/^Basic ([A-Za-z0-9+/]+={0,2})$/i);
-      const suppliedAuth = auth ? Buffer.from(auth[1], "base64") : Buffer.alloc(0);
-      if (suppliedAuth.length !== expectedAuth.length || !timingSafeEqual(suppliedAuth, expectedAuth)) {
-        res.writeHead(401, { "WWW-Authenticate": 'Basic realm="Pi Pocket", charset="UTF-8"' }).end("Authentication required");
+      const cookieName = requestOrigin === localOrigin ? "pi-pocket-local" : "__Host-pi-pocket";
+      const cookie = req.headers.cookie?.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
+      const browser = pairing.identify(cookie);
+      if (req.method === "POST" && req.url === "/api/pair") {
+        if (req.headers.origin !== requestOrigin || req.headers["content-type"] !== "application/json") { res.writeHead(403).end(); return; }
+        let body = "";
+        for await (const chunk of req) { body += chunk; if (body.length > 1024) { res.writeHead(413).end(); return; } }
+        try {
+          const token = pairing.accept(JSON.parse(body).code, req.headers["user-agent"]);
+          if (!token) { res.writeHead(401).end("Invalid or expired pairing code."); return; }
+          res.setHeader("Set-Cookie", `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000${requestOrigin === localOrigin ? "" : "; Secure"}`);
+          res.writeHead(200).end();
+        } catch (error) {
+          ctx.ui.notify(`Pi Pocket pairing failed: ${error}`, "error");
+          res.writeHead(400).end("Could not complete pairing. Generate a new code on the laptop.");
+        }
         return;
       }
-      if (req.method === "GET" && req.url === "/") {
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(html);
+      if (req.method === "GET" && (req.url === "/" || req.url === "/pair")) {
+        res.setHeader("Referrer-Policy", "no-referrer");
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(browser && req.url === "/" ? html : pairPage);
+      } else if (!browser) {
+        res.writeHead(401).end("Pair this browser using /remote pair on the laptop.");
       } else if (req.method === "GET" && (req.url === "/marked.js" || req.url === "/purify.js" || req.url === "/highlight.js")) {
         res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" }).end(req.url === "/marked.js" ? marked : req.url === "/purify.js" ? dompurify : highlight);
       } else if (req.method === "GET" && req.url === "/api/session") {
@@ -164,6 +231,7 @@ export default function (pi: ExtensionAPI) {
           busy: !ctx.isIdle(),
           waiting,
           queued: queued.length,
+          browser,
         }));
       } else if (req.method === "POST" && req.url === "/api/prompt") {
         if (req.headers.origin !== requestOrigin || req.headers["content-type"] !== "application/json") {

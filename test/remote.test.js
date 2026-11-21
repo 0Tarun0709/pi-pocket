@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM, requestInterceptor } from 'jsdom';
+import jsQR from 'jsqr';
 import { Server } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -11,7 +12,7 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
   process.env.PI_CODING_AGENT_DIR = state;
   const { default: extension } = await import('../extensions/pocket/index.ts');
   const events = {}, commands = {};
-  let url, key, busy = false, aborts = 0;
+  let url, code, qrLines, busy = false, aborts = 0;
   extension({ registerCommand(name, command) { commands[name] = command; }, registerEntryRenderer() {}, on(name, handler) { events[name] = handler; }, sendUserMessage() {} });
   // Tests use an ephemeral port so an active Pi Remote session can keep its fixed port.
   const listen = Server.prototype.listen;
@@ -28,17 +29,30 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
     abort: () => { aborts++; },
     ui: { notify(message) {
       if (message.startsWith('Pi Remote: http')) url = message.replace('Pi Remote: ', '');
-      if (message.includes('Access key: ')) key = message.match(/Access key: (\S+)/)[1];
-    } },
+    }, custom: async factory => { const lines = factory({}, { fg: (_color, text) => text }, {}, () => {}).render(200); code = lines.find(line => line.startsWith('Code: ')).slice(6); qrLines = lines.filter(line => line.startsWith('\x1b[30;47m')).map(line => line.slice(8, -4)); } },
   };
   try { await events.session_start({}, ctx); } finally { Server.prototype.listen = listen; }
-  await commands.remote.handler('', ctx);
-  const authorization = 'Basic ' + Buffer.from(`pocket:${key}`).toString('base64');
+  await commands.remote.handler('pair', ctx);
+  const scale = 4, width = qrLines[0].length * scale, height = qrLines.length * 2 * scale;
+  const pixels = new Uint8ClampedArray(width * height * 4).fill(255);
+  for (let row = 0; row < qrLines.length; row++) for (let col = 0; col < qrLines[row].length; col++) {
+    const cell = qrLines[row][col];
+    for (let half = 0; half < 2; half++) {
+      const black = cell === '█' || (half === 0 ? cell === '▀' : cell === '▄');
+      if (black) for (let y = 0; y < scale; y++) for (let x = 0; x < scale; x++) {
+        const at = (((row * 2 + half) * scale + y) * width + col * scale + x) * 4;
+        pixels[at] = pixels[at + 1] = pixels[at + 2] = 0;
+      }
+    }
+  }
+  assert.equal(jsQR(pixels, width, height)?.data, `${url}/pair#pair=${code}`);
+  const paired = await fetch(url + '/api/pair', { method: 'POST', headers: { origin: url, 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
+  const cookie = paired.headers.get('set-cookie').split(';')[0];
   let dom;
   try {
     dom = await JSDOM.fromURL(url, {
-      resources: { interceptors: [requestInterceptor(request => fetch(request.url, { headers: { authorization } }))] }, runScripts: 'dangerously',
-      beforeParse(window) { window.fetch = (path, options) => fetch(new URL(path, url), { ...options, headers: { ...options?.headers, origin: url, authorization } }); },
+      resources: { interceptors: [requestInterceptor(request => fetch(request.url, { headers: { cookie } }))] }, runScripts: 'dangerously',
+      beforeParse(window) { window.fetch = (path, options) => fetch(new URL(path, url), { ...options, headers: { ...options?.headers, origin: url, cookie } }); },
     });
     for (let i = 0; i < 100 && !dom.window.document.querySelector('.markdown h1'); i++) {
       await new Promise(resolve => setTimeout(resolve, 20));
@@ -54,6 +68,7 @@ test('renders streamed markdown safely and keeps user text literal', async () =>
     theme.dispatchEvent(new dom.window.Event('change'));
     assert.equal(document.documentElement.dataset.theme, 'light');
     assert.match(document.cookie, /pi-remote-theme=light/);
+    assert.match(document.querySelector('#browser-label').textContent, /^This browser: .+ · [a-f0-9]{16}$/);
     assert.equal(document.querySelector('.source-label').textContent, 'Pi Pocket · Tailscale address');
     assert.equal(document.querySelector('.message.user .bubble').textContent, '**literal**');
     assert.equal(document.querySelector('.markdown h1').textContent, 'Heading');
